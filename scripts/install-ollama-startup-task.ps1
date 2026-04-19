@@ -5,33 +5,52 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $ollamaCommand = Get-Command ollama -ErrorAction Stop
-$currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
-$action = New-ScheduledTaskAction `
-  -Execute $ollamaCommand.Path `
-  -Argument "serve"
-$trigger = New-ScheduledTaskTrigger -AtLogOn
-$settings = New-ScheduledTaskSettingsSet `
-  -AllowStartIfOnBatteries `
-  -DontStopIfGoingOnBatteries `
-  -StartWhenAvailable
-$principal = New-ScheduledTaskPrincipal `
-  -UserId $currentUser `
-  -LogonType Interactive `
-  -RunLevel Limited
+$startScript = Join-Path $repoRoot "scripts\start-ollama-background.ps1"
+$startupFile = Join-Path ([Environment]::GetFolderPath("Startup")) "OllamaServe.cmd"
 
-Register-ScheduledTask `
-  -TaskName $TaskName `
-  -Action $action `
-  -Trigger $trigger `
-  -Settings $settings `
-  -Principal $principal `
-  -Description "Starts the Ollama local model server when you log in." `
-  -Force | Out-Null
-
-if ($StartNow) {
-  Start-ScheduledTask -TaskName $TaskName
+function Install-StartupEntry {
+  $content = "@echo off`r`npowershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$startScript`"`r`n"
+  Set-Content -Path $startupFile -Value $content -Encoding ASCII
 }
 
-Write-Output "Scheduled task '$TaskName' is installed."
+$currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+$installedVia = "scheduled task"
+
+try {
+  $action = New-ScheduledTaskAction `
+    -Execute $ollamaCommand.Path `
+    -Argument "serve"
+  $trigger = New-ScheduledTaskTrigger -AtLogOn
+  $settings = New-ScheduledTaskSettingsSet `
+    -AllowStartIfOnBatteries `
+    -DontStopIfGoingOnBatteries `
+    -StartWhenAvailable
+  $principal = New-ScheduledTaskPrincipal `
+    -UserId $currentUser `
+    -LogonType Interactive `
+    -RunLevel Limited
+
+  Register-ScheduledTask `
+    -TaskName $TaskName `
+    -Action $action `
+    -Trigger $trigger `
+    -Settings $settings `
+    -Principal $principal `
+    -Description "Starts the Ollama local model server when you log in." `
+    -Force | Out-Null
+} catch {
+  Install-StartupEntry
+  $installedVia = "Startup folder entry"
+}
+
+if ($StartNow) {
+  Start-Process `
+    -FilePath "powershell.exe" `
+    -ArgumentList @("-NoProfile", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-File", $startScript) `
+    -WindowStyle Hidden | Out-Null
+}
+
+Write-Output "Ollama autostart is installed via $installedVia."
 Write-Output "It will start Ollama when $currentUser logs in."

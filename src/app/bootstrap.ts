@@ -8,8 +8,11 @@ import { createLogger } from "../logging/logger.js";
 import { OllamaClient } from "../llm/ollama-client.js";
 import { MemoryStore } from "../memory/store.js";
 import { createBot } from "../telegram/bot.js";
+import { AppLauncher } from "../tools/app-launcher.js";
+import { DesktopController } from "../tools/desktop-controller.js";
 import { createDefaultToolRegistry } from "../tools/registry.js";
 import { ShellRunner } from "../tools/shell-runner.js";
+import { VisionClient } from "../tools/vision-client.js";
 import { createPathAccessPolicy } from "../tools/workspace.js";
 
 export interface AppServices {
@@ -20,6 +23,9 @@ export interface AppServices {
   memoryStore: MemoryStore;
   approvalStore: ApprovalStore;
   shellRunner: ShellRunner;
+  appLauncher: AppLauncher;
+  desktopController: DesktopController;
+  visionClient: VisionClient;
 }
 
 export async function buildApp(env: AppEnv = loadEnv()): Promise<AppServices> {
@@ -33,11 +39,21 @@ export async function buildApp(env: AppEnv = loadEnv()): Promise<AppServices> {
   const memoryStore = new MemoryStore(env.databasePath, logger);
   const approvalStore = new ApprovalStore();
   const shellRunner = new ShellRunner();
+  const appLauncher = new AppLauncher({ logger });
+  const desktopController = new DesktopController({ logger, appLauncher });
+  const visionClient = new VisionClient({
+    host: env.ollamaHost,
+    model: env.ollamaModel,
+    logger
+  });
   const toolRegistry = createDefaultToolRegistry({
     memoryStore,
     pathAccessPolicy,
     approvalStore,
     shellRunner,
+    appLauncher,
+    desktopController,
+    visionClient,
     logger
   });
   const ollamaClient = new OllamaClient({
@@ -76,7 +92,10 @@ export async function buildApp(env: AppEnv = loadEnv()): Promise<AppServices> {
     ollamaClient,
     memoryStore,
     approvalStore,
-    shellRunner
+    shellRunner,
+    appLauncher,
+    desktopController,
+    visionClient
   };
 }
 

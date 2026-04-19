@@ -2,13 +2,27 @@ import type { ToolDefinition, ToolExecutionContext } from "../agent/types.js";
 import { ApprovalStore } from "../approvals/store.js";
 import type { Logger } from "../logging/logger.js";
 import { MemoryStore } from "../memory/store.js";
+import { AppLauncher } from "./app-launcher.js";
+import { createCloseAppTool } from "./close-app.js";
+import { DesktopController } from "./desktop-controller.js";
+import { createFindElementTool } from "./find-element.js";
+import { createFocusAppTool } from "./focus-app.js";
 import { createGetCurrentTimeTool } from "./get-current-time.js";
+import { createKeyboardHotkeyTool } from "./keyboard-hotkey.js";
+import { createKeyboardTypeTool } from "./keyboard-type.js";
+import { createLaunchAppTool } from "./launch-app.js";
+import { createListAppsTool } from "./list-apps.js";
 import { createListFilesTool } from "./list-files.js";
+import { createMouseClickTool } from "./mouse-click.js";
+import { createOcrReadTool } from "./ocr-read.js";
 import { createReadFileTool } from "./read-file.js";
 import { createRecallMemoryTool } from "./recall-memory.js";
 import { createRememberFactTool } from "./remember-fact.js";
 import { createRunShellCommandTool } from "./run-shell-command.js";
 import { createSearchFilesTool } from "./search-files.js";
+import { createTakeScreenshotTool } from "./take-screenshot.js";
+import { VisionClient } from "./vision-client.js";
+import { createWaitForElementTool } from "./wait-for-element.js";
 import { ShellRunner } from "./shell-runner.js";
 import type { PathAccessPolicy } from "./workspace.js";
 
@@ -55,6 +69,9 @@ interface CreateDefaultToolRegistryOptions {
   pathAccessPolicy: PathAccessPolicy;
   approvalStore: ApprovalStore;
   shellRunner: ShellRunner;
+  appLauncher: AppLauncher;
+  desktopController: DesktopController;
+  visionClient: VisionClient;
   logger: Logger;
 }
 
@@ -63,6 +80,17 @@ export function createDefaultToolRegistry(options: CreateDefaultToolRegistryOpti
     createGetCurrentTimeTool(),
     createRememberFactTool(options.memoryStore),
     createRecallMemoryTool(options.memoryStore),
+    createLaunchAppTool(options.appLauncher),
+    createListAppsTool(options.desktopController),
+    createFocusAppTool(options.desktopController),
+    createCloseAppTool(options.desktopController),
+    createTakeScreenshotTool(options.desktopController),
+    createOcrReadTool(options.desktopController, options.visionClient),
+    createKeyboardHotkeyTool(options.desktopController),
+    createKeyboardTypeTool(options.desktopController),
+    createMouseClickTool(options.desktopController),
+    createFindElementTool(options.desktopController, options.visionClient),
+    createWaitForElementTool(options.desktopController, options.visionClient),
     createListFilesTool(options.pathAccessPolicy),
     createReadFileTool(options.pathAccessPolicy),
     createSearchFilesTool(options.pathAccessPolicy),

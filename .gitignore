@@ -4,6 +4,7 @@ dist/
 .env.local
 .runtime/
 *.log
+artifacts/
 *.db
 *.db-shm
 *.db-wal

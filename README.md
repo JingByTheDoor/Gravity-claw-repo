@@ -12,6 +12,17 @@ Level 4 tools-ready foundation for a local-first Telegram AI agent.
   - `get_current_time`
   - `remember_fact`
   - `recall_memory`
+  - `launch_app`
+  - `list_apps`
+  - `focus_app`
+  - `close_app`
+  - `take_screenshot`
+  - `ocr_read`
+  - `keyboard_hotkey`
+  - `keyboard_type`
+  - `mouse_click`
+  - `find_element`
+  - `wait_for_element`
   - `list_files`
   - `read_file`
   - `search_files`
@@ -56,19 +67,23 @@ For a long-running local bot, use production mode instead of `npm run dev`. This
 
 - Double-click `start-bot.cmd` to build the app and start the bot in the background.
 - Double-click `stop-bot.cmd` to stop the background bot.
-- Double-click `install-bot-autostart.cmd` to register a Windows Scheduled Task that starts the bot automatically when you log in.
-- Double-click `remove-bot-autostart.cmd` to remove that Scheduled Task.
-- Double-click `install-ollama-autostart.cmd` to register a Windows Scheduled Task that starts Ollama automatically when you log in.
-- Double-click `remove-ollama-autostart.cmd` to remove the Ollama auto-start task.
+- Double-click `install-bot-autostart.cmd` to set up Windows auto-start for the bot when you log in.
+- Double-click `remove-bot-autostart.cmd` to remove that bot auto-start setup.
+- Double-click `install-ollama-autostart.cmd` to set up Windows auto-start for Ollama when you log in.
+- Double-click `remove-ollama-autostart.cmd` to remove the Ollama auto-start setup.
 
-Background logs are written to `logs/bot.out.log` and `logs/bot.err.log`. The running process ID is stored in `.runtime/bot.pid`.
+Background logs are written to `logs/bot.out.log` and `logs/bot.err.log`. The supervisor log is `logs/bot-supervisor.log`. The running process IDs are stored in `.runtime/bot-supervisor.pid` and `.runtime/bot.pid`.
 
 Important:
 
 - `npm run dev` is for development only. It uses `tsx watch`, keeps a terminal attached, and restarts on file changes.
-- The background scripts build the project and then run `node dist/src/index.js`, which matches the `npm start` production path.
+- The background start script now launches a small supervisor process. That supervisor builds the project, runs `node dist/src/index.js`, and watches for local file changes.
+- If you edit files in `src`, `.env`, `package.json`, `package-lock.json`, `tsconfig.json`, or update the repo with `git pull`, the supervisor rebuilds and restarts the bot automatically after the files change locally.
+- If the build fails after an edit, the supervisor logs the failure and keeps the last working bot process running.
+- If `package.json` or `package-lock.json` changed and you installed dependencies manually with `npm install`, the supervisor sees the updated local files and redeploys automatically.
 - Ollama still has to be running locally. If Ollama is not up when the bot starts, the bot exits during bootstrap.
 - The Ollama helper installs a task that runs `ollama serve` at logon, which is the local API server your bot talks to.
+- If Windows blocks Scheduled Task creation on your account, the install scripts fall back to a Startup folder entry for the same logon auto-start behavior.
 
 ## If the computer is off
 
@@ -99,3 +114,4 @@ npm run build
 - Use `/approve <id>` or `/deny <id>` for shell commands that require confirmation.
 - Read-only shell commands may run immediately; mutating or unclear commands require approval first.
 - By default, file tools stay in `WORKSPACE_ROOT`. Add `TOOL_ALLOWED_ROOTS` in `.env` to let the bot inspect extra trusted folders with absolute paths.
+- Screenshots are saved under `artifacts/screenshots/` by default.
