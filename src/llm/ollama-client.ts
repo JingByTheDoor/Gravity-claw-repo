@@ -6,6 +6,8 @@ interface OllamaClientOptions {
   host: string;
   model: string;
   logger: Logger;
+  healthCheckMaxAttempts?: number;
+  healthCheckRetryDelayMs?: number;
 }
 
 interface OllamaTagsResponse {
@@ -39,42 +41,60 @@ interface OllamaMessage {
   }>;
 }
 
+const DEFAULT_HEALTH_CHECK_MAX_ATTEMPTS = 6;
+const DEFAULT_HEALTH_CHECK_RETRY_DELAY_MS = 1_000;
+
 export class OllamaClient implements LLMClient {
   constructor(private readonly options: OllamaClientOptions) {}
 
   async checkHealth(): Promise<void> {
-    let response: Response;
-    try {
-      response = await fetch(this.buildUrl("/api/tags"));
-    } catch (error) {
-      throw new Error(
-        `Ollama is unreachable at ${this.options.host}: ${
-          error instanceof Error ? error.message : String(error)
-        }`
-      );
+    const maxAttempts = Math.max(1, this.options.healthCheckMaxAttempts ?? DEFAULT_HEALTH_CHECK_MAX_ATTEMPTS);
+    const retryDelayMs = Math.max(0, this.options.healthCheckRetryDelayMs ?? DEFAULT_HEALTH_CHECK_RETRY_DELAY_MS);
+    let lastError: Error | undefined;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        const response = await fetch(this.buildUrl("/api/tags"));
+        if (!response.ok) {
+          throw new Error(
+            `Ollama health check failed with status ${response.status} ${response.statusText}`
+          );
+        }
+
+        const payload = (await response.json()) as OllamaTagsResponse;
+        const modelNames = new Set(
+          (payload.models ?? []).flatMap((model) => (model.name ? [model.name] : []))
+        );
+
+        if (!modelNames.has(this.options.model)) {
+          throw new Error(
+            `Configured Ollama model "${this.options.model}" is not available locally.`
+          );
+        }
+
+        this.options.logger.info("ollama.health.ok", {
+          host: this.options.host,
+          model: this.options.model
+        });
+        return;
+      } catch (error) {
+        const normalizedError = this.normalizeHealthCheckError(error);
+        if (!this.shouldRetryHealthCheck(normalizedError, attempt, maxAttempts)) {
+          throw normalizedError;
+        }
+
+        lastError = normalizedError;
+        this.options.logger.warn("ollama.health.retrying", {
+          attempt,
+          maxAttempts,
+          host: this.options.host,
+          error: normalizedError.message
+        });
+        await this.sleep(retryDelayMs);
+      }
     }
 
-    if (!response.ok) {
-      throw new Error(
-        `Ollama health check failed with status ${response.status} ${response.statusText}`
-      );
-    }
-
-    const payload = (await response.json()) as OllamaTagsResponse;
-    const modelNames = new Set(
-      (payload.models ?? []).flatMap((model) => (model.name ? [model.name] : []))
-    );
-
-    if (!modelNames.has(this.options.model)) {
-      throw new Error(
-        `Configured Ollama model "${this.options.model}" is not available locally.`
-      );
-    }
-
-    this.options.logger.info("ollama.health.ok", {
-      host: this.options.host,
-      model: this.options.model
-    });
+    throw lastError ?? new Error(`Ollama health check failed for ${this.options.host}`);
   }
 
   async runStep(request: LLMRunRequest): Promise<LLMRunResponse> {
@@ -124,6 +144,40 @@ export class OllamaClient implements LLMClient {
   private buildUrl(pathname: string): string {
     const base = this.options.host.replace(/\/+$/, "");
     return `${base}${pathname}`;
+  }
+
+  private normalizeHealthCheckError(error: unknown): Error {
+    if (error instanceof Error) {
+      if (/^Ollama (is unreachable|health check failed|chat request failed)/i.test(error.message)) {
+        return error;
+      }
+
+      if (/^Configured Ollama model /i.test(error.message)) {
+        return error;
+      }
+
+      return new Error(`Ollama is unreachable at ${this.options.host}: ${error.message}`);
+    }
+
+    return new Error(`Ollama is unreachable at ${this.options.host}: ${String(error)}`);
+  }
+
+  private shouldRetryHealthCheck(error: Error, attempt: number, maxAttempts: number): boolean {
+    if (attempt >= maxAttempts) {
+      return false;
+    }
+
+    return !/^Configured Ollama model /i.test(error.message);
+  }
+
+  private async sleep(durationMs: number): Promise<void> {
+    if (durationMs <= 0) {
+      return;
+    }
+
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, durationMs);
+    });
   }
 
   private parseToolCalls(toolCalls: OllamaToolCall[] | undefined): ToolCall[] | undefined {
