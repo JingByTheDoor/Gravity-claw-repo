@@ -1,22 +1,28 @@
 # Gravity Claw
 
-Level 1 foundation for a local-first Telegram AI agent.
+Level 4 tools-ready foundation for a local-first Telegram AI agent.
 
-## What Level 1 includes
+## What is included
 
 - Telegram bot via `grammy` long polling
 - Local Ollama inference only
 - A bounded tool loop
-- One built-in tool: `get_current_time`
+- Local SQLite memory with recent context, durable facts, and rolling summaries
+- Built-in tools:
+  - `get_current_time`
+  - `remember_fact`
+  - `recall_memory`
+  - `list_files`
+  - `read_file`
+  - `search_files`
+  - `run_shell_command`
 - Telegram user ID allowlist
 
-## What Level 1 does not include
+## What is still not included
 
 - Web server or webhooks
-- Persistent memory
 - Voice
 - MCP integrations
-- Shell, file, or network tools
 
 ## Requirements
 
@@ -31,7 +37,9 @@ Level 1 foundation for a local-first Telegram AI agent.
 1. Copy `.env.example` to `.env`
 2. Fill in `TELEGRAM_BOT_TOKEN` and `TELEGRAM_ALLOWED_USER_ID`
 3. Make sure Ollama is running and the configured model exists
-4. Install dependencies:
+4. Optional: change `DATABASE_PATH` if you do not want `gravity-claw.db` in the repo root
+5. Optional: set `WORKSPACE_ROOT` if the agent should inspect a different local folder
+6. Install dependencies:
 
 ```bash
 npm install
@@ -54,5 +62,9 @@ npm run build
 ## Notes
 
 - Unauthorized Telegram users are ignored silently.
-- Level 1 accepts text messages only.
+- The bot accepts text messages only.
 - Small local models can miss tool calls or need simpler prompts. This is expected at this stage.
+- Conversation memory is stored locally in SQLite and kept on your machine.
+- Use `/new` in Telegram to start a fresh chat session while keeping durable memory facts.
+- Use `/approve <id>` or `/deny <id>` for shell commands that require confirmation.
+- Read-only shell commands may run immediately; mutating or unclear commands require approval first.

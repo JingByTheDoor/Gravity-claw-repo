@@ -1,7 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 import { ChatTaskQueue } from "../src/agent/queue.js";
+import { ApprovalStore } from "../src/approvals/store.js";
 import { createLogger } from "../src/logging/logger.js";
-import { createMessageHandler, TEXT_ONLY_MESSAGE } from "../src/telegram/handlers.js";
+import {
+  createApproveCommandHandler,
+  createDenyCommandHandler,
+  createMessageHandler,
+  createNewCommandHandler,
+  NEW_CHAT_MESSAGE,
+  TEXT_ONLY_MESSAGE
+} from "../src/telegram/handlers.js";
 
 describe("Telegram message handler", () => {
   it("replies to whitelisted text messages", async () => {
@@ -73,5 +81,96 @@ describe("Telegram message handler", () => {
     });
 
     expect(reply).toHaveBeenCalledWith(TEXT_ONLY_MESSAGE);
+  });
+
+  it("handles /new by resetting conversation state", async () => {
+    const resetConversation = vi.fn(() => undefined);
+    const handler = createNewCommandHandler({
+      allowedUserId: "123",
+      memoryStore: {
+        getPromptContext: vi.fn(() => ({
+          coreFacts: [],
+          recentMessages: []
+        })),
+        rememberFact: vi.fn((_chatId: string, key: string, value: string) => ({ key, value })),
+        listFacts: vi.fn(() => []),
+        saveConversationTurn: vi.fn(() => undefined),
+        compactConversation: vi.fn(async () => undefined),
+        resetConversation
+      },
+      queue: new ChatTaskQueue(),
+      logger: createLogger("error")
+    });
+
+    const reply = vi.fn(async () => undefined);
+
+    await handler({
+      from: { id: 123 },
+      chat: { id: 77 },
+      reply
+    });
+
+    expect(resetConversation).toHaveBeenCalledWith("77");
+    expect(reply).toHaveBeenCalledWith(NEW_CHAT_MESSAGE);
+  });
+
+  it("approves a pending command and returns output", async () => {
+    const approvalStore = new ApprovalStore();
+    const approval = approvalStore.createShellApproval("77", "git status", process.cwd());
+    const shellRunner = {
+      executeApproval: vi.fn(async () => ({
+        ok: true,
+        exitCode: 0,
+        stdout: "status ok",
+        stderr: ""
+      }))
+    };
+
+    const handler = createApproveCommandHandler({
+      allowedUserId: "123",
+      approvalStore,
+      shellRunner: shellRunner as never,
+      workspaceRoot: process.cwd(),
+      queue: new ChatTaskQueue(),
+      logger: createLogger("error")
+    });
+
+    const reply = vi.fn(async () => undefined);
+    await handler(
+      {
+        from: { id: 123 },
+        chat: { id: 77 },
+        reply
+      },
+      approval.id
+    );
+
+    expect(shellRunner.executeApproval).toHaveBeenCalled();
+    expect(reply).toHaveBeenCalledWith(expect.stringContaining(`Approved command ${approval.id}.`));
+  });
+
+  it("denies a pending command", async () => {
+    const approvalStore = new ApprovalStore();
+    const approval = approvalStore.createShellApproval("77", "npm install", process.cwd());
+    const handler = createDenyCommandHandler({
+      allowedUserId: "123",
+      approvalStore,
+      shellRunner: { executeApproval: vi.fn() } as never,
+      workspaceRoot: process.cwd(),
+      queue: new ChatTaskQueue(),
+      logger: createLogger("error")
+    });
+
+    const reply = vi.fn(async () => undefined);
+    await handler(
+      {
+        from: { id: 123 },
+        chat: { id: 77 },
+        reply
+      },
+      approval.id
+    );
+
+    expect(reply).toHaveBeenCalledWith(`Denied command ${approval.id}.`);
   });
 });

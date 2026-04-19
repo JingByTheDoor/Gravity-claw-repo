@@ -1,18 +1,24 @@
 import type { Bot } from "grammy";
 import { AgentLoop } from "../agent/loop.js";
 import { ChatTaskQueue } from "../agent/queue.js";
+import { ApprovalStore } from "../approvals/store.js";
 import type { AppEnv } from "../config/env.js";
 import { loadEnv } from "../config/env.js";
 import { createLogger } from "../logging/logger.js";
 import { OllamaClient } from "../llm/ollama-client.js";
+import { MemoryStore } from "../memory/store.js";
 import { createBot } from "../telegram/bot.js";
 import { createDefaultToolRegistry } from "../tools/registry.js";
+import { ShellRunner } from "../tools/shell-runner.js";
 
 export interface AppServices {
   env: AppEnv;
   bot: Bot;
   agentLoop: AgentLoop;
   ollamaClient: OllamaClient;
+  memoryStore: MemoryStore;
+  approvalStore: ApprovalStore;
+  shellRunner: ShellRunner;
 }
 
 export async function buildApp(env: AppEnv = loadEnv()): Promise<AppServices> {
@@ -21,7 +27,17 @@ export async function buildApp(env: AppEnv = loadEnv()): Promise<AppServices> {
   }
 
   const logger = createLogger(env.logLevel);
-  const toolRegistry = createDefaultToolRegistry();
+  const workspaceRoot = env.workspaceRoot ?? process.cwd();
+  const memoryStore = new MemoryStore(env.databasePath, logger);
+  const approvalStore = new ApprovalStore();
+  const shellRunner = new ShellRunner();
+  const toolRegistry = createDefaultToolRegistry({
+    memoryStore,
+    workspaceRoot,
+    approvalStore,
+    shellRunner,
+    logger
+  });
   const ollamaClient = new OllamaClient({
     host: env.ollamaHost,
     model: env.ollamaModel,
@@ -33,6 +49,7 @@ export async function buildApp(env: AppEnv = loadEnv()): Promise<AppServices> {
   const agentLoop = new AgentLoop({
     llmClient: ollamaClient,
     toolRegistry,
+    memoryStore,
     maxIterations: env.agentMaxIterations,
     logger
   });
@@ -42,6 +59,10 @@ export async function buildApp(env: AppEnv = loadEnv()): Promise<AppServices> {
     botToken: env.telegramBotToken,
     allowedUserId: env.telegramAllowedUserId,
     agentLoop,
+    memoryStore,
+    approvalStore,
+    shellRunner,
+    workspaceRoot,
     queue,
     logger
   });
@@ -50,7 +71,10 @@ export async function buildApp(env: AppEnv = loadEnv()): Promise<AppServices> {
     env,
     bot,
     agentLoop,
-    ollamaClient
+    ollamaClient,
+    memoryStore,
+    approvalStore,
+    shellRunner
   };
 }
 
@@ -66,7 +90,9 @@ export async function startApp(app: AppServices): Promise<void> {
           meta: {
             botId: String(botInfo.id),
             botUsername: botInfo.username ?? "",
-            ollamaModel: app.env.ollamaModel
+            ollamaModel: app.env.ollamaModel,
+            databasePath: app.env.databasePath,
+            workspaceRoot: app.env.workspaceRoot ?? process.cwd()
           }
         })
       );

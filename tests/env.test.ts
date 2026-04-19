@@ -15,6 +15,7 @@ describe("parseEnv", () => {
     expect(env.ollamaHost).toBe("http://127.0.0.1:11434");
     expect(env.ollamaModel).toBe("qwen2.5:3b");
     expect(env.agentMaxIterations).toBe(4);
+    expect(env.databasePath).toBe("gravity-claw.db");
     expect(env.logLevel).toBe("info");
   });
 });

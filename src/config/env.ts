@@ -10,6 +10,8 @@ const envSchema = z.object({
   OLLAMA_HOST: z.string().trim().url().default("http://127.0.0.1:11434"),
   OLLAMA_MODEL: z.string().trim().min(1).default("qwen2.5:3b"),
   AGENT_MAX_ITERATIONS: z.coerce.number().int().min(1).max(10).default(4),
+  DATABASE_PATH: z.string().trim().min(1).default("gravity-claw.db"),
+  WORKSPACE_ROOT: z.string().trim().min(1).optional(),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
   TZ: z.string().trim().min(1).optional()
 });
@@ -20,6 +22,8 @@ export interface AppEnv {
   ollamaHost: string;
   ollamaModel: string;
   agentMaxIterations: number;
+  databasePath: string;
+  workspaceRoot?: string;
   logLevel: "debug" | "info" | "warn" | "error";
   timeZone?: string;
 }
@@ -37,6 +41,8 @@ export function parseEnv(source: Record<string, string | undefined>): AppEnv {
     ollamaHost: result.data.OLLAMA_HOST,
     ollamaModel: result.data.OLLAMA_MODEL,
     agentMaxIterations: result.data.AGENT_MAX_ITERATIONS,
+    databasePath: result.data.DATABASE_PATH,
+    ...(result.data.WORKSPACE_ROOT ? { workspaceRoot: result.data.WORKSPACE_ROOT } : {}),
     logLevel: result.data.LOG_LEVEL,
     ...(result.data.TZ ? { timeZone: result.data.TZ } : {})
   };

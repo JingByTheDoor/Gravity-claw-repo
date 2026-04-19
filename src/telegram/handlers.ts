@@ -1,8 +1,31 @@
 import type { ChatTaskQueue } from "../agent/queue.js";
+import type { ApprovalStore } from "../approvals/store.js";
 import type { Logger } from "../logging/logger.js";
+import type { MemoryStoreLike } from "../memory/store.js";
+import type { ShellRunner } from "../tools/shell-runner.js";
+import { toWorkspaceRelativePath } from "../tools/workspace.js";
 import { isAuthorizedUser } from "./auth.js";
 
 export const TEXT_ONLY_MESSAGE = "Level 1 supports text messages only.";
+export const NEW_CHAT_MESSAGE =
+  "Started a new chat. I kept your durable memory facts and cleared recent conversation history.";
+
+function isNewCommand(text: string): boolean {
+  return /^\/new(?:@[\w_]+)?(?:\s|$)/i.test(text.trim());
+}
+
+function isApproveCommand(text: string): boolean {
+  return /^\/approve(?:@[\w_]+)?(?:\s|$)/i.test(text.trim());
+}
+
+function isDenyCommand(text: string): boolean {
+  return /^\/deny(?:@[\w_]+)?(?:\s|$)/i.test(text.trim());
+}
+
+function parseCommandArgument(text: string): string | undefined {
+  const [, argument] = text.trim().split(/\s+/, 2);
+  return argument?.trim() || undefined;
+}
 
 interface MessageContext {
   from?: { id: number };
@@ -17,10 +40,16 @@ interface MessageContext {
   reply(text: string): Promise<unknown>;
 }
 
+interface CommandContext {
+  from?: { id: number } | undefined;
+  chat?: { id: number | string | bigint } | undefined;
+  reply(text: string): Promise<unknown>;
+}
+
 interface MessageHandlerDependencies {
   allowedUserId: string;
   agentLoop: {
-    run(userInput: string): Promise<string>;
+    run(chatId: string, userInput: string): Promise<string>;
   };
   queue: ChatTaskQueue;
   logger: Logger;
@@ -45,19 +74,141 @@ export function createMessageHandler(dependencies: MessageHandlerDependencies) {
         return;
       }
 
+      if (
+        isNewCommand(context.message.text) ||
+        isApproveCommand(context.message.text) ||
+        isDenyCommand(context.message.text)
+      ) {
+        return;
+      }
+
       dependencies.logger.info("telegram.message.received", {
         chatId,
         userId: String(context.from?.id)
       });
 
       await context.api.sendChatAction(chat.id, "typing");
-      const replyText = await dependencies.agentLoop.run(context.message.text);
+      const replyText = await dependencies.agentLoop.run(chatId, context.message.text);
       await context.reply(replyText);
 
       dependencies.logger.info("telegram.message.replied", {
         chatId,
         userId: String(context.from?.id)
       });
+    });
+  };
+}
+
+interface NewCommandDependencies {
+  allowedUserId: string;
+  memoryStore: MemoryStoreLike;
+  queue: ChatTaskQueue;
+  logger: Logger;
+}
+
+export function createNewCommandHandler(dependencies: NewCommandDependencies) {
+  return async (context: CommandContext): Promise<void> => {
+    if (!context.from || !isAuthorizedUser(context.from.id, dependencies.allowedUserId)) {
+      return;
+    }
+
+    if (!context.chat) {
+      return;
+    }
+
+    const chatId = String(context.chat.id);
+    await dependencies.queue.run(chatId, async () => {
+      dependencies.memoryStore.resetConversation(chatId);
+      dependencies.logger.info("telegram.command.new", {
+        chatId,
+        userId: String(context.from?.id)
+      });
+      await context.reply(NEW_CHAT_MESSAGE);
+    });
+  };
+}
+
+interface ApprovalCommandDependencies {
+  allowedUserId: string;
+  approvalStore: ApprovalStore;
+  shellRunner: ShellRunner;
+  workspaceRoot: string;
+  queue: ChatTaskQueue;
+  logger: Logger;
+}
+
+export function createApproveCommandHandler(dependencies: ApprovalCommandDependencies) {
+  return async (context: CommandContext, rawArgument?: string): Promise<void> => {
+    if (!context.from || !isAuthorizedUser(context.from.id, dependencies.allowedUserId)) {
+      return;
+    }
+
+    if (!context.chat) {
+      return;
+    }
+
+    const chatId = String(context.chat.id);
+    await dependencies.queue.run(chatId, async () => {
+      const approvalId = rawArgument ? parseCommandArgument(`/approve ${rawArgument}`) : undefined;
+      const approval = dependencies.approvalStore.consume(chatId, approvalId);
+
+      if (!approval) {
+        await context.reply("No pending approval found for this chat.");
+        return;
+      }
+
+      dependencies.logger.info("telegram.command.approve", {
+        chatId,
+        approvalId: approval.id
+      });
+
+      const result = await dependencies.shellRunner.executeApproval(approval);
+      const cwd = toWorkspaceRelativePath(dependencies.workspaceRoot, approval.cwd);
+      const replyLines = [
+        `Approved command ${approval.id}.`,
+        `cwd: ${cwd}`,
+        `exitCode: ${String(result.exitCode ?? "null")}`
+      ];
+
+      if (result.stdout) {
+        replyLines.push(`stdout:\n${result.stdout}`);
+      }
+
+      if (result.stderr) {
+        replyLines.push(`stderr:\n${result.stderr}`);
+      }
+
+      await context.reply(replyLines.join("\n"));
+    });
+  };
+}
+
+export function createDenyCommandHandler(dependencies: ApprovalCommandDependencies) {
+  return async (context: CommandContext, rawArgument?: string): Promise<void> => {
+    if (!context.from || !isAuthorizedUser(context.from.id, dependencies.allowedUserId)) {
+      return;
+    }
+
+    if (!context.chat) {
+      return;
+    }
+
+    const chatId = String(context.chat.id);
+    await dependencies.queue.run(chatId, async () => {
+      const approvalId = rawArgument ? parseCommandArgument(`/deny ${rawArgument}`) : undefined;
+      const approval = dependencies.approvalStore.deny(chatId, approvalId);
+
+      if (!approval) {
+        await context.reply("No pending approval found for this chat.");
+        return;
+      }
+
+      dependencies.logger.info("telegram.command.deny", {
+        chatId,
+        approvalId: approval.id
+      });
+
+      await context.reply(`Denied command ${approval.id}.`);
     });
   };
 }

@@ -5,6 +5,10 @@ export interface ToolCall {
   arguments: Record<string, unknown>;
 }
 
+export interface ToolExecutionContext {
+  chatId: string;
+}
+
 export interface AgentMessage {
   role: AgentRole;
   content: string;
@@ -29,7 +33,7 @@ export interface ToolDefinition {
   name: string;
   description: string;
   parameters: JsonSchema;
-  execute(input: Record<string, unknown>): Promise<string>;
+  execute(input: Record<string, unknown>, context: ToolExecutionContext): Promise<string>;
 }
 
 export interface LLMRunRequest {
