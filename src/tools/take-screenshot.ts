@@ -1,5 +1,9 @@
 import type { ToolDefinition } from "../agent/types.js";
-import { DesktopController, parseDesktopInteger } from "./desktop-controller.js";
+import {
+  DesktopController,
+  parseDesktopInteger,
+  type ScreenshotOptions
+} from "./desktop-controller.js";
 
 function parseMode(input: unknown): "full" | "region" {
   return input === "region" ? "region" : "full";
@@ -41,14 +45,30 @@ export function createTakeScreenshotTool(desktopController: DesktopController): 
       additionalProperties: false
     },
     async execute(input) {
-      return JSON.stringify(await desktopController.takeScreenshot({
-        mode: parseMode(input.mode),
-        ...(parseDesktopInteger(input.x) !== undefined ? { x: parseDesktopInteger(input.x) } : {}),
-        ...(parseDesktopInteger(input.y) !== undefined ? { y: parseDesktopInteger(input.y) } : {}),
-        ...(parseDesktopInteger(input.width) !== undefined ? { width: parseDesktopInteger(input.width) } : {}),
-        ...(parseDesktopInteger(input.height) !== undefined ? { height: parseDesktopInteger(input.height) } : {}),
-        ...(typeof input.output_path === "string" ? { outputPath: input.output_path } : {})
-      }));
+      const screenshotOptions: ScreenshotOptions = {
+        mode: parseMode(input.mode)
+      };
+      const x = parseDesktopInteger(input.x);
+      const y = parseDesktopInteger(input.y);
+      const width = parseDesktopInteger(input.width);
+      const height = parseDesktopInteger(input.height);
+      if (x !== undefined) {
+        screenshotOptions.x = x;
+      }
+      if (y !== undefined) {
+        screenshotOptions.y = y;
+      }
+      if (width !== undefined) {
+        screenshotOptions.width = width;
+      }
+      if (height !== undefined) {
+        screenshotOptions.height = height;
+      }
+      if (typeof input.output_path === "string") {
+        screenshotOptions.outputPath = input.output_path;
+      }
+
+      return JSON.stringify(await desktopController.takeScreenshot(screenshotOptions));
     }
   };
 }

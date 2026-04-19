@@ -1,5 +1,9 @@
 import type { ToolDefinition } from "../agent/types.js";
-import { DesktopController, parseDesktopInteger } from "./desktop-controller.js";
+import {
+  DesktopController,
+  parseDesktopInteger,
+  type ScreenshotOptions
+} from "./desktop-controller.js";
 import { VisionClient } from "./vision-client.js";
 
 function parseMode(input: unknown): "full" | "region" {
@@ -62,15 +66,28 @@ export function createWaitForElementTool(
       const timeoutMs = Math.min(Math.max(parseDesktopInteger(input.timeout_ms) ?? 8000, 500), 30000);
       const intervalMs = Math.min(Math.max(parseDesktopInteger(input.interval_ms) ?? 1000, 250), 5000);
       const startedAt = Date.now();
+      const screenshotOptions: ScreenshotOptions = {
+        mode: parseMode(input.mode)
+      };
+      const x = parseDesktopInteger(input.x);
+      const y = parseDesktopInteger(input.y);
+      const width = parseDesktopInteger(input.width);
+      const height = parseDesktopInteger(input.height);
+      if (x !== undefined) {
+        screenshotOptions.x = x;
+      }
+      if (y !== undefined) {
+        screenshotOptions.y = y;
+      }
+      if (width !== undefined) {
+        screenshotOptions.width = width;
+      }
+      if (height !== undefined) {
+        screenshotOptions.height = height;
+      }
 
       while (Date.now() - startedAt <= timeoutMs) {
-        const screenshot = await desktopController.takeScreenshot({
-          mode: parseMode(input.mode),
-          ...(parseDesktopInteger(input.x) !== undefined ? { x: parseDesktopInteger(input.x) } : {}),
-          ...(parseDesktopInteger(input.y) !== undefined ? { y: parseDesktopInteger(input.y) } : {}),
-          ...(parseDesktopInteger(input.width) !== undefined ? { width: parseDesktopInteger(input.width) } : {}),
-          ...(parseDesktopInteger(input.height) !== undefined ? { height: parseDesktopInteger(input.height) } : {})
-        });
+        const screenshot = await desktopController.takeScreenshot(screenshotOptions);
         const result = await visionClient.findElement(screenshot.path, query);
         if (result.found) {
           return JSON.stringify({

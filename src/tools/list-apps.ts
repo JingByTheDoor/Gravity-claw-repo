@@ -25,11 +25,22 @@ export function createListAppsTool(desktopController: DesktopController): ToolDe
       additionalProperties: false
     },
     async execute(input) {
-      const result = await desktopController.listApps({
-        ...(typeof input.query === "string" ? { query: input.query } : {}),
-        includeInstalled: parseDesktopBoolean(input.include_installed, false),
-        ...(parseDesktopInteger(input.limit) ? { limit: parseDesktopInteger(input.limit) } : {})
-      });
+      const listOptions: {
+        query?: string;
+        includeInstalled?: boolean;
+        limit?: number;
+      } = {
+        includeInstalled: parseDesktopBoolean(input.include_installed, false)
+      };
+      if (typeof input.query === "string") {
+        listOptions.query = input.query;
+      }
+      const limit = parseDesktopInteger(input.limit);
+      if (limit !== undefined) {
+        listOptions.limit = limit;
+      }
+
+      const result = await desktopController.listApps(listOptions);
 
       return JSON.stringify(result);
     }
