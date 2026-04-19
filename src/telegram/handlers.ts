@@ -1,8 +1,10 @@
 import fs from "node:fs/promises";
 import { InputFile } from "grammy";
 import type { AgentRunResult } from "../agent/loop.js";
+import type { AgentRunOptions } from "../agent/progress.js";
 import type { ChatTaskQueue } from "../agent/queue.js";
 import type { ApprovalStore } from "../approvals/store.js";
+import type { RuntimeErrorStore } from "../errors/runtime-error-store.js";
 import type { Logger } from "../logging/logger.js";
 import type { MemoryStoreLike } from "../memory/store.js";
 import type { ShellRunner } from "../tools/shell-runner.js";
@@ -12,6 +14,8 @@ import { isAuthorizedUser } from "./auth.js";
 export const TEXT_ONLY_MESSAGE = "Level 1 supports text messages only.";
 export const NEW_CHAT_MESSAGE =
   "Started a new chat. I kept your durable memory facts and cleared recent conversation history.";
+export const LIVE_STEERING_MESSAGE =
+  "Noted. I'll treat this as guidance for the task that's already running.";
 
 function isNewCommand(text: string): boolean {
   return /^\/new(?:@[\w_]+)?(?:\s|$)/i.test(text.trim());
@@ -23,6 +27,10 @@ function isApproveCommand(text: string): boolean {
 
 function isDenyCommand(text: string): boolean {
   return /^\/deny(?:@[\w_]+)?(?:\s|$)/i.test(text.trim());
+}
+
+function isLastErrorCommand(text: string): boolean {
+  return /^\/last_error(?:@[\w_]+)?(?:\s|$)/i.test(text.trim());
 }
 
 function parseCommandArgument(text: string): string | undefined {
@@ -57,7 +65,7 @@ interface CommandContext {
 interface MessageHandlerDependencies {
   allowedUserId: string;
   agentLoop: {
-    run(chatId: string, userInput: string): Promise<AgentRunResult>;
+    run(chatId: string, userInput: string, options?: AgentRunOptions): Promise<AgentRunResult>;
   };
   queue: ChatTaskQueue;
   logger: Logger;
@@ -105,6 +113,23 @@ export function createMessageHandler(dependencies: MessageHandlerDependencies) {
     const chatId = String(context.chat.id);
     const chat = context.chat;
 
+    if (
+      typeof context.message?.text === "string" &&
+      context.message.text.trim().length > 0 &&
+      !isNewCommand(context.message.text) &&
+      !isLastErrorCommand(context.message.text) &&
+      !isApproveCommand(context.message.text) &&
+      !isDenyCommand(context.message.text) &&
+      dependencies.queue.captureSteeringMessage(chatId, context.message.text)
+    ) {
+      dependencies.logger.info("telegram.message.steering_received", {
+        chatId,
+        userId: String(context.from?.id)
+      });
+      await context.reply(LIVE_STEERING_MESSAGE);
+      return;
+    }
+
     await dependencies.queue.run(chatId, async () => {
       if (typeof context.message?.text !== "string" || context.message.text.trim().length === 0) {
         await context.reply(TEXT_ONLY_MESSAGE);
@@ -113,6 +138,7 @@ export function createMessageHandler(dependencies: MessageHandlerDependencies) {
 
       if (
         isNewCommand(context.message.text) ||
+        isLastErrorCommand(context.message.text) ||
         isApproveCommand(context.message.text) ||
         isDenyCommand(context.message.text)
       ) {
@@ -125,7 +151,35 @@ export function createMessageHandler(dependencies: MessageHandlerDependencies) {
       });
 
       await context.api.sendChatAction(chat.id, "typing");
-      const agentResult = await dependencies.agentLoop.run(chatId, context.message.text);
+      let lastProgressMessage: string | undefined;
+      const progressOptions: AgentRunOptions = {
+        onProgress: async (message) => {
+          const trimmedMessage = message.trim();
+          if (trimmedMessage.length === 0 || trimmedMessage === lastProgressMessage) {
+            return;
+          }
+
+          lastProgressMessage = trimmedMessage;
+
+          try {
+            await context.reply(trimmedMessage);
+          } catch (error) {
+            dependencies.logger.warn("telegram.message.progress_failed", {
+              chatId,
+              error: error instanceof Error ? error.message : String(error)
+            });
+          }
+        },
+        consumeSteeringMessages: () => dependencies.queue.consumeSteeringMessages(chatId)
+      };
+      dependencies.queue.beginActiveRun(chatId);
+      let agentResult!: AgentRunResult;
+      try {
+        agentResult = await dependencies.agentLoop.run(chatId, context.message.text, progressOptions);
+      } finally {
+        dependencies.queue.endActiveRun(chatId);
+      }
+      await context.api.sendChatAction(chat.id, "typing");
       await context.reply(agentResult.replyText);
       await sendImageAttachments(context, chat.id, agentResult, dependencies.logger, chatId);
 
@@ -171,6 +225,13 @@ interface ApprovalCommandDependencies {
   approvalStore: ApprovalStore;
   shellRunner: ShellRunner;
   pathAccessPolicy: PathAccessPolicy;
+  queue: ChatTaskQueue;
+  logger: Logger;
+}
+
+interface LastErrorCommandDependencies {
+  allowedUserId: string;
+  errorStore: RuntimeErrorStore;
   queue: ChatTaskQueue;
   logger: Logger;
 }
@@ -247,6 +308,36 @@ export function createDenyCommandHandler(dependencies: ApprovalCommandDependenci
       });
 
       await context.reply(`Denied command ${approval.id}.`);
+    });
+  };
+}
+
+export function createLastErrorCommandHandler(dependencies: LastErrorCommandDependencies) {
+  return async (context: CommandContext): Promise<void> => {
+    if (!context.from || !isAuthorizedUser(context.from.id, dependencies.allowedUserId)) {
+      return;
+    }
+
+    if (!context.chat) {
+      return;
+    }
+
+    const chatId = String(context.chat.id);
+    await dependencies.queue.run(chatId, async () => {
+      const errorEntry = dependencies.errorStore.getLast(chatId);
+      if (!errorEntry) {
+        await context.reply("No local error is stored for this chat.");
+        return;
+      }
+
+      dependencies.logger.info("telegram.command.last_error", {
+        chatId,
+        scope: errorEntry.scope
+      });
+
+      await context.reply(
+        `Last local error:\nscope: ${errorEntry.scope}\ntime: ${errorEntry.createdAt}\nmessage: ${errorEntry.message}`
+      );
     });
   };
 }

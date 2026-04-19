@@ -6,6 +6,7 @@ Level 4 tools-ready foundation for a local-first Telegram AI agent.
 
 - Telegram bot via `grammy` long polling
 - Local Ollama inference only
+- Optional fast-first model routing with escalation to a stronger local model
 - A bounded tool loop
 - Local SQLite memory with recent context, durable facts, and rolling summaries
 - Built-in tools:
@@ -39,7 +40,8 @@ Level 4 tools-ready foundation for a local-first Telegram AI agent.
 
 - Node.js 22+
 - Ollama running locally at `http://127.0.0.1:11434`
-- A pulled model, default `qwen2.5:3b`
+- A pulled primary model, default `qwen2.5:3b`
+- Optional pulled fast model for first-pass routing, for example `qwen2.5:1.5b`
 - Telegram bot token from BotFather
 - Your Telegram numeric user ID
 
@@ -48,10 +50,11 @@ Level 4 tools-ready foundation for a local-first Telegram AI agent.
 1. Copy `.env.example` to `.env`
 2. Fill in `TELEGRAM_BOT_TOKEN` and `TELEGRAM_ALLOWED_USER_ID`
 3. Make sure Ollama is running and the configured model exists
-4. Optional: change `DATABASE_PATH` if you do not want `gravity-claw.db` in the repo root
-5. Optional: set `WORKSPACE_ROOT` if the agent should inspect a different local folder
-6. Optional: set `TOOL_ALLOWED_ROOTS` if the agent should read or use shell cwd in additional local folders outside the default workspace root
-6. Install dependencies:
+4. Optional: set `OLLAMA_FAST_MODEL` to a smaller local model if you want every task to hit a fast router first and escalate harder requests to `OLLAMA_MODEL`
+5. Optional: change `DATABASE_PATH` if you do not want `gravity-claw.db` in the repo root
+6. Optional: set `WORKSPACE_ROOT` if the agent should inspect a different local folder
+7. Optional: set `TOOL_ALLOWED_ROOTS` if the agent should read or use shell cwd in additional local folders outside the default workspace root
+8. Install dependencies:
 
 ```bash
 npm install
@@ -109,6 +112,7 @@ npm run build
 - Unauthorized Telegram users are ignored silently.
 - The bot accepts text messages only.
 - Small local models can miss tool calls or need simpler prompts. This is expected at this stage.
+- If `OLLAMA_FAST_MODEL` is set, the fast model sees each task first, keeps easy tasks for itself, and rewrites/escalates harder ones to `OLLAMA_MODEL`.
 - Conversation memory is stored locally in SQLite and kept on your machine.
 - Use `/new` in Telegram to start a fresh chat session while keeping durable memory facts.
 - Use `/approve <id>` or `/deny <id>` for shell commands that require confirmation.

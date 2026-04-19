@@ -9,6 +9,7 @@ const envSchema = z.object({
     .regex(/^\d+$/, "TELEGRAM_ALLOWED_USER_ID must be a numeric Telegram user ID."),
   OLLAMA_HOST: z.string().trim().url().default("http://127.0.0.1:11434"),
   OLLAMA_MODEL: z.string().trim().min(1).default("qwen2.5:3b"),
+  OLLAMA_FAST_MODEL: z.string().trim().min(1).optional(),
   AGENT_MAX_ITERATIONS: z.coerce.number().int().min(1).max(10).default(4),
   DATABASE_PATH: z.string().trim().min(1).default("gravity-claw.db"),
   WORKSPACE_ROOT: z.string().trim().min(1).optional(),
@@ -22,6 +23,7 @@ export interface AppEnv {
   telegramAllowedUserId: string;
   ollamaHost: string;
   ollamaModel: string;
+  ollamaFastModel: string;
   agentMaxIterations: number;
   databasePath: string;
   workspaceRoot?: string;
@@ -48,11 +50,15 @@ export function parseEnv(source: Record<string, string | undefined>): AppEnv {
     throw new Error(`Invalid environment configuration:\n${issues}`);
   }
 
+  const ollamaModel = result.data.OLLAMA_MODEL;
+  const ollamaFastModel = result.data.OLLAMA_FAST_MODEL?.trim() || ollamaModel;
+
   return {
     telegramBotToken: result.data.TELEGRAM_BOT_TOKEN,
     telegramAllowedUserId: result.data.TELEGRAM_ALLOWED_USER_ID,
     ollamaHost: result.data.OLLAMA_HOST,
-    ollamaModel: result.data.OLLAMA_MODEL,
+    ollamaModel,
+    ollamaFastModel,
     agentMaxIterations: result.data.AGENT_MAX_ITERATIONS,
     databasePath: result.data.DATABASE_PATH,
     ...(result.data.WORKSPACE_ROOT ? { workspaceRoot: result.data.WORKSPACE_ROOT } : {}),

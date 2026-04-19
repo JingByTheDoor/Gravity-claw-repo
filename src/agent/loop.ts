@@ -1,14 +1,27 @@
 import { buildSystemPrompt } from "./prompt.js";
+import {
+  formatTaskStartedProgressMessage,
+  formatToolFinishedProgressMessage,
+  formatToolStartProgressMessage,
+  ITERATION_LIMIT_PROGRESS_MESSAGE,
+  LOCAL_ERROR_PROGRESS_MESSAGE,
+  PLANNING_PROGRESS_MESSAGE,
+  PREPARING_REPLY_PROGRESS_MESSAGE,
+  STEERING_PROGRESS_MESSAGE,
+  type AgentRunOptions
+} from "./progress.js";
 import type { AgentMessage } from "./types.js";
+import { RuntimeErrorStore } from "../errors/runtime-error-store.js";
 import type { LLMClient } from "../llm/client.js";
+import type { TaskRouter } from "../llm/task-router.js";
 import type { Logger } from "../logging/logger.js";
 import type { MemoryFact, MemoryPromptContext, MemoryStoreLike } from "../memory/store.js";
 import type { ToolRegistry } from "../tools/registry.js";
 
 export const ITERATION_LIMIT_MESSAGE =
-  "I hit my safety limit before finishing. Please try again with a simpler request.";
+  "I hit my local step limit before finishing. I can only take a small number of tool/model steps per message, so please break this into smaller steps.";
 export const LOCAL_ERROR_MESSAGE =
-  "I hit a local error before finishing. Please try again.";
+  "I hit a local error before finishing. Send /last_error to inspect the most recent failure.";
 export const EMPTY_REPLY_MESSAGE =
   "I couldn't produce a useful reply.";
 
@@ -24,10 +37,12 @@ export interface AgentRunResult {
 
 interface AgentLoopOptions {
   llmClient: LLMClient;
+  taskRouter?: TaskRouter;
   toolRegistry: ToolRegistry;
   memoryStore: MemoryStoreLike;
   maxIterations: number;
   logger: Logger;
+  errorStore: RuntimeErrorStore;
 }
 
 interface ExtractedFact {
@@ -87,6 +102,10 @@ function extractFavoriteColorQuestion(text: string): boolean {
   return /\bwhat(?:'s| is) my favou?rite colou?r\b/i.test(text);
 }
 
+function isIterationLimitQuestion(text: string): boolean {
+  return /\b(safety limit|step limit|iteration limit|max iterations|like iterations)\b/i.test(text);
+}
+
 function isSimpleScreenshotRequest(text: string): boolean {
   const normalized = text.trim().toLowerCase();
   if (!/\b(screen ?shot|screenshot)\b/.test(normalized)) {
@@ -94,7 +113,7 @@ function isSimpleScreenshotRequest(text: string): boolean {
   }
 
   if (
-    /\b(ocr|find element|wait for element|read the text|text on screen|what(?:'s| is) on screen)\b/.test(
+    /\b(ocr|find element|wait for element|read the text|text on screen|what(?:'s| is) on screen|open|launch|start|focus|close|describe|then|after|before|while|wait)\b/.test(
       normalized
     )
   ) {
@@ -145,10 +164,34 @@ function extractToolAttachments(
   }
 }
 
+function formatSteeringMessage(steeringMessages: string[]): string {
+  return [
+    "Live steering for the current task.",
+    "Treat this as updated guidance for the same task, not as a separate request.",
+    steeringMessages.map((message) => `- ${message}`).join("\n")
+  ].join("\n\n");
+}
+
+function mergeSteeringIntoUserInput(userInput: string, steeringMessages: string[]): string {
+  if (steeringMessages.length === 0) {
+    return userInput;
+  }
+
+  return [
+    userInput,
+    "Additional steering received while the task was running:",
+    steeringMessages.map((message) => `- ${message}`).join("\n")
+  ].join("\n\n");
+}
+
 export class AgentLoop {
   constructor(private readonly options: AgentLoopOptions) {}
 
-  async run(chatId: string, userInput: string): Promise<AgentRunResult> {
+  async run(
+    chatId: string,
+    userInput: string,
+    runOptions: AgentRunOptions = {}
+  ): Promise<AgentRunResult> {
     const trimmedInput = userInput.trim();
     if (trimmedInput.length === 0) {
       return {
@@ -159,8 +202,11 @@ export class AgentLoop {
 
     const attachments: AgentAttachment[] = [];
     const attachmentPaths = new Set<string>();
+    const appliedSteeringMessages: string[] = [];
 
     try {
+      await this.emitProgress(runOptions, formatTaskStartedProgressMessage(trimmedInput));
+
       const extractedFacts = extractDurableFacts(trimmedInput);
       for (const fact of extractedFacts) {
         this.options.memoryStore.rememberFact(chatId, fact.key, fact.value);
@@ -168,6 +214,7 @@ export class AgentLoop {
 
       const directReply = this.tryDirectReply(chatId, trimmedInput);
       if (directReply) {
+        await this.emitProgress(runOptions, PREPARING_REPLY_PROGRESS_MESSAGE);
         await this.persistTurn(chatId, trimmedInput, directReply);
         return {
           replyText: directReply,
@@ -175,22 +222,44 @@ export class AgentLoop {
         };
       }
 
-      const directActionResult = await this.tryDirectAction(chatId, trimmedInput);
+      const directActionResult = await this.tryDirectAction(chatId, trimmedInput, runOptions);
       if (directActionResult) {
+        await this.emitProgress(runOptions, PREPARING_REPLY_PROGRESS_MESSAGE);
         await this.persistTurn(chatId, trimmedInput, directActionResult.replyText);
         return directActionResult;
       }
 
       const promptContext = this.options.memoryStore.getPromptContext(chatId, 20);
-      const messages = this.buildMessages(promptContext, trimmedInput);
+      const tools = this.options.toolRegistry.list();
+      const routedTask = await this.options.taskRouter?.routeTask({
+        userInput: trimmedInput,
+        promptContext,
+        tools
+      });
+      const llmClient = routedTask?.llmClient ?? this.options.llmClient;
+      const llmUserInput = routedTask?.preparedUserInput ?? trimmedInput;
+      const messages = this.buildMessages(promptContext, llmUserInput);
+      await this.emitProgress(runOptions, PLANNING_PROGRESS_MESSAGE);
 
       for (let iteration = 1; iteration <= this.options.maxIterations; iteration += 1) {
         this.options.logger.debug("agent.iteration.start", { iteration });
 
-        const response = await this.options.llmClient.runStep({
+        await this.applyPendingSteering(messages, runOptions, appliedSteeringMessages);
+
+        const response = await llmClient.runStep({
           messages,
-          tools: this.options.toolRegistry.list()
+          tools
         });
+
+        const steeringAppliedAfterResponse = await this.applyPendingSteering(
+          messages,
+          runOptions,
+          appliedSteeringMessages
+        );
+        if (steeringAppliedAfterResponse) {
+          await this.emitProgress(runOptions, PLANNING_PROGRESS_MESSAGE);
+          continue;
+        }
 
         messages.push(response.message);
 
@@ -198,7 +267,12 @@ export class AgentLoop {
         if (toolCalls.length === 0) {
           const content = response.message.content.trim();
           const finalReply = content.length > 0 ? content : EMPTY_REPLY_MESSAGE;
-          await this.persistTurn(chatId, trimmedInput, finalReply);
+          await this.emitProgress(runOptions, PREPARING_REPLY_PROGRESS_MESSAGE);
+          await this.persistTurn(
+            chatId,
+            mergeSteeringIntoUserInput(trimmedInput, appliedSteeringMessages),
+            finalReply
+          );
           return {
             replyText: finalReply,
             attachments
@@ -207,6 +281,10 @@ export class AgentLoop {
 
         for (const toolCall of toolCalls) {
           const startedAt = Date.now();
+          await this.emitProgress(
+            runOptions,
+            formatToolStartProgressMessage(toolCall.name, toolCall.arguments)
+          );
           this.options.logger.info("agent.tool.call", {
             iteration,
             toolName: toolCall.name
@@ -221,6 +299,10 @@ export class AgentLoop {
             toolName: toolCall.name,
             durationMs: Date.now() - startedAt
           });
+          await this.emitProgress(
+            runOptions,
+            formatToolFinishedProgressMessage(toolCall.name, toolCall.arguments, result)
+          );
 
           attachments.push(...extractToolAttachments(toolCall.name, result, attachmentPaths));
 
@@ -236,16 +318,28 @@ export class AgentLoop {
         maxIterations: this.options.maxIterations
       });
 
-      await this.persistTurn(chatId, trimmedInput, ITERATION_LIMIT_MESSAGE);
+      await this.emitProgress(runOptions, ITERATION_LIMIT_PROGRESS_MESSAGE);
+      await this.persistTurn(
+        chatId,
+        mergeSteeringIntoUserInput(trimmedInput, appliedSteeringMessages),
+        ITERATION_LIMIT_MESSAGE
+      );
       return {
         replyText: ITERATION_LIMIT_MESSAGE,
         attachments
       };
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
       this.options.logger.error("agent.run.error", {
-        error: error instanceof Error ? error.message : String(error)
+        error: errorMessage
       });
-      await this.persistTurn(chatId, trimmedInput, LOCAL_ERROR_MESSAGE);
+      this.options.errorStore.record(chatId, "agent.run", errorMessage);
+      await this.emitProgress(runOptions, LOCAL_ERROR_PROGRESS_MESSAGE);
+      await this.persistTurn(
+        chatId,
+        mergeSteeringIntoUserInput(trimmedInput, appliedSteeringMessages),
+        LOCAL_ERROR_MESSAGE
+      );
       return {
         replyText: LOCAL_ERROR_MESSAGE,
         attachments
@@ -268,22 +362,35 @@ export class AgentLoop {
       return "I don't have your favorite color saved yet.";
     }
 
-    return undefined;
-  }
-
-  private async tryDirectAction(
-    chatId: string,
-    userInput: string
-  ): Promise<AgentRunResult | undefined> {
-    if (isSimpleScreenshotRequest(userInput)) {
-      return this.takeDirectScreenshot(chatId);
+    if (isIterationLimitQuestion(userInput)) {
+      return `My local limit here is mainly the agent step limit. I can take up to ${this.options.maxIterations} tool/model steps in one message before I stop and ask you to break the task into smaller steps.`;
     }
 
     return undefined;
   }
 
-  private async takeDirectScreenshot(chatId: string): Promise<AgentRunResult> {
+  private async tryDirectAction(
+    chatId: string,
+    userInput: string,
+    runOptions: AgentRunOptions
+  ): Promise<AgentRunResult | undefined> {
+    if (isSimpleScreenshotRequest(userInput)) {
+      return this.takeDirectScreenshot(chatId, runOptions);
+    }
+
+    return undefined;
+  }
+
+  private async takeDirectScreenshot(
+    chatId: string,
+    runOptions: AgentRunOptions
+  ): Promise<AgentRunResult> {
+    await this.emitProgress(runOptions, formatToolStartProgressMessage("take_screenshot", {}));
     const rawResult = await this.options.toolRegistry.execute("take_screenshot", {}, { chatId });
+    await this.emitProgress(
+      runOptions,
+      formatToolFinishedProgressMessage("take_screenshot", {}, rawResult)
+    );
     const attachmentPaths = new Set<string>();
     const attachments = extractToolAttachments("take_screenshot", rawResult, attachmentPaths);
 
@@ -327,6 +434,44 @@ export class AgentLoop {
       ...promptContext.recentMessages,
       { role: "user", content: userInput }
     ];
+  }
+
+  private async applyPendingSteering(
+    messages: AgentMessage[],
+    runOptions: AgentRunOptions,
+    appliedSteeringMessages: string[]
+  ): Promise<boolean> {
+    const steeringMessages = await this.consumeSteeringMessages(runOptions);
+    if (steeringMessages.length === 0) {
+      return false;
+    }
+
+    appliedSteeringMessages.push(...steeringMessages);
+    messages.push({
+      role: "user",
+      content: formatSteeringMessage(steeringMessages)
+    });
+    await this.emitProgress(runOptions, STEERING_PROGRESS_MESSAGE);
+    return true;
+  }
+
+  private async consumeSteeringMessages(runOptions: AgentRunOptions): Promise<string[]> {
+    const steeringMessages = await runOptions.consumeSteeringMessages?.();
+    if (!steeringMessages) {
+      return [];
+    }
+
+    return steeringMessages
+      .map((message) => message.trim())
+      .filter((message) => message.length > 0);
+  }
+
+  private async emitProgress(runOptions: AgentRunOptions, message: string): Promise<void> {
+    if (message.trim().length === 0) {
+      return;
+    }
+
+    await runOptions.onProgress?.(message);
   }
 
   private async persistTurn(chatId: string, userInput: string, assistantReply: string): Promise<void> {

@@ -20,6 +20,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
     "When the user asks you to do something and a tool can do it, use the tool instead of only describing what you could do.",
     "Use tools only when needed.",
     "You are in a loop and may call a tool, inspect the result, and then answer.",
+    "If the user sends live steering while you are already working, treat it as updated guidance for the same task.",
     "For desktop tasks, prefer this order: inspect state, act, verify, then reply.",
     "If you are unsure what is on screen or which app is active, inspect first instead of guessing.",
     "Never invent tool results.",

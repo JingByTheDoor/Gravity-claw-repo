@@ -21,4 +21,23 @@ describe("ChatTaskQueue", () => {
 
     expect(events).toEqual(["first-start", "first-end", "second-start", "second-end"]);
   });
+
+  it("tracks active runs and captures steering messages", () => {
+    const queue = new ChatTaskQueue();
+
+    expect(queue.captureSteeringMessage("chat-1", "be careful")).toBe(false);
+
+    queue.beginActiveRun("chat-1");
+    expect(queue.isActiveRun("chat-1")).toBe(true);
+    expect(queue.captureSteeringMessage("chat-1", "be careful")).toBe(true);
+    expect(queue.captureSteeringMessage("chat-1", "  use a shorter answer  ")).toBe(true);
+    expect(queue.consumeSteeringMessages("chat-1")).toEqual([
+      "be careful",
+      "use a shorter answer"
+    ]);
+    expect(queue.consumeSteeringMessages("chat-1")).toEqual([]);
+
+    queue.endActiveRun("chat-1");
+    expect(queue.isActiveRun("chat-1")).toBe(false);
+  });
 });

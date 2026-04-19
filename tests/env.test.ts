@@ -22,5 +22,18 @@ describe("environment parsing", () => {
     });
 
     expect(env.toolAllowedRoots).toEqual([]);
+    expect(env.ollamaFastModel).toBe(env.ollamaModel);
+  });
+
+  it("parses an explicit fast routing model", () => {
+    const env = parseEnv({
+      TELEGRAM_BOT_TOKEN: "token",
+      TELEGRAM_ALLOWED_USER_ID: "123",
+      OLLAMA_MODEL: "qwen2.5:7b",
+      OLLAMA_FAST_MODEL: "qwen2.5:1.5b"
+    });
+
+    expect(env.ollamaModel).toBe("qwen2.5:7b");
+    expect(env.ollamaFastModel).toBe("qwen2.5:1.5b");
   });
 });

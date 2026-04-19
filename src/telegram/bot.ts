@@ -2,6 +2,7 @@ import { Bot } from "grammy";
 import type { AgentLoop } from "../agent/loop.js";
 import type { ChatTaskQueue } from "../agent/queue.js";
 import type { ApprovalStore } from "../approvals/store.js";
+import type { RuntimeErrorStore } from "../errors/runtime-error-store.js";
 import type { Logger } from "../logging/logger.js";
 import type { MemoryStoreLike } from "../memory/store.js";
 import type { ShellRunner } from "../tools/shell-runner.js";
@@ -9,6 +10,7 @@ import type { PathAccessPolicy } from "../tools/workspace.js";
 import {
   createApproveCommandHandler,
   createDenyCommandHandler,
+  createLastErrorCommandHandler,
   createMessageHandler,
   createNewCommandHandler
 } from "./handlers.js";
@@ -19,6 +21,7 @@ interface CreateBotOptions {
   agentLoop: AgentLoop;
   memoryStore: MemoryStoreLike;
   approvalStore: ApprovalStore;
+  errorStore: RuntimeErrorStore;
   shellRunner: ShellRunner;
   pathAccessPolicy: PathAccessPolicy;
   queue: ChatTaskQueue;
@@ -55,8 +58,15 @@ export function createBot(options: CreateBotOptions): Bot {
     queue: options.queue,
     logger: options.logger
   });
+  const lastErrorCommandHandler = createLastErrorCommandHandler({
+    allowedUserId: options.allowedUserId,
+    errorStore: options.errorStore,
+    queue: options.queue,
+    logger: options.logger
+  });
 
   bot.command("new", newCommandHandler);
+  bot.command("last_error", lastErrorCommandHandler);
   bot.command("approve", async (context) => approveCommandHandler(context, context.match));
   bot.command("deny", async (context) => denyCommandHandler(context, context.match));
   bot.on("message", messageHandler);
