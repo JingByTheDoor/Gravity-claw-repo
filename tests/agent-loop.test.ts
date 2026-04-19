@@ -41,7 +41,10 @@ describe("AgentLoop", () => {
       logger: createLogger("error")
     });
 
-    await expect(loop.run("chat-1", "hello")).resolves.toBe("Hello from local Ollama.");
+    await expect(loop.run("chat-1", "hello")).resolves.toEqual({
+      replyText: "Hello from local Ollama.",
+      attachments: []
+    });
   });
 
   it("handles a tool roundtrip", async () => {
@@ -72,9 +75,10 @@ describe("AgentLoop", () => {
       logger: createLogger("error")
     });
 
-    await expect(loop.run("chat-1", "What time is it in UTC?")).resolves.toBe(
-      "It is currently UTC time."
-    );
+    await expect(loop.run("chat-1", "What time is it in UTC?")).resolves.toEqual({
+      replyText: "It is currently UTC time.",
+      attachments: []
+    });
     expect(llmClient.runStep).toHaveBeenCalledTimes(2);
   });
 
@@ -109,7 +113,8 @@ describe("AgentLoop", () => {
     });
 
     const reply = await loop.run("chat-1", "Time on Mars?");
-    expect(reply).toBe("That timezone is invalid.");
+    expect(reply.replyText).toBe("That timezone is invalid.");
+    expect(reply.attachments).toEqual([]);
 
     const secondCall = vi.mocked(llmClient.runStep).mock.calls[1]?.[0];
     const toolMessage = secondCall?.messages.find((message) => message.role === "tool");
@@ -136,7 +141,10 @@ describe("AgentLoop", () => {
       logger: createLogger("error")
     });
 
-    await expect(loop.run("chat-1", "loop")).resolves.toBe(ITERATION_LIMIT_MESSAGE);
+    await expect(loop.run("chat-1", "loop")).resolves.toEqual({
+      replyText: ITERATION_LIMIT_MESSAGE,
+      attachments: []
+    });
   });
 
   it("answers memory recall questions directly from stored facts", async () => {
@@ -161,9 +169,10 @@ describe("AgentLoop", () => {
       logger: createLogger("error")
     });
 
-    await expect(loop.run("chat-1", "what do you know about me?")).resolves.toBe(
-      "Here's what I know about you:\n- favorite color: orange\n- timezone: America/Vancouver"
-    );
+    await expect(loop.run("chat-1", "what do you know about me?")).resolves.toEqual({
+      replyText: "Here's what I know about you:\n- favorite color: orange\n- timezone: America/Vancouver",
+      attachments: []
+    });
   });
 
   it("stores obvious durable facts even without a tool call", async () => {
@@ -188,5 +197,56 @@ describe("AgentLoop", () => {
 
     await loop.run("chat-1", "My favourite colour is orange");
     expect(memoryStore.rememberFact).toHaveBeenCalledWith("chat-1", "favorite_color", "orange");
+  });
+
+  it("collects screenshot attachments from screenshot tools", async () => {
+    const llmClient: LLMClient = {
+      checkHealth: vi.fn(async () => undefined),
+      runStep: vi
+        .fn()
+        .mockResolvedValueOnce({
+          message: {
+            role: "assistant",
+            content: "",
+            toolCalls: [{ name: "take_screenshot", arguments: {} }]
+          }
+        } satisfies LLMRunResponse)
+        .mockResolvedValueOnce({
+          message: {
+            role: "assistant",
+            content: "Here is the screenshot."
+          }
+        } satisfies LLMRunResponse)
+    };
+
+    const loop = new AgentLoop({
+      llmClient,
+      toolRegistry: new ToolRegistry([{
+        name: "take_screenshot",
+        description: "test screenshot",
+        parameters: {
+          type: "object",
+          properties: {},
+          additionalProperties: false
+        },
+        execute: vi.fn(async () =>
+          JSON.stringify({
+            ok: true,
+            path: "C:\\temp\\screen.png"
+          })
+        )
+      }]),
+      memoryStore: createMemoryStoreStub(),
+      maxIterations: 4,
+      logger: createLogger("error")
+    });
+
+    await expect(loop.run("chat-1", "take a screenshot")).resolves.toEqual({
+      replyText: "Here is the screenshot.",
+      attachments: [{
+        kind: "image",
+        path: "C:\\temp\\screen.png"
+      }]
+    });
   });
 });

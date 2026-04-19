@@ -1,3 +1,6 @@
+import fs from "node:fs/promises";
+import { InputFile } from "grammy";
+import type { AgentRunResult } from "../agent/loop.js";
 import type { ChatTaskQueue } from "../agent/queue.js";
 import type { ApprovalStore } from "../approvals/store.js";
 import type { Logger } from "../logging/logger.js";
@@ -36,6 +39,11 @@ interface MessageContext {
   };
   api: {
     sendChatAction(chatId: number | string | bigint, action: "typing"): Promise<unknown>;
+    sendPhoto?(
+      chatId: number | string | bigint,
+      photo: unknown,
+      other?: { caption?: string }
+    ): Promise<unknown>;
   };
   reply(text: string): Promise<unknown>;
 }
@@ -49,10 +57,39 @@ interface CommandContext {
 interface MessageHandlerDependencies {
   allowedUserId: string;
   agentLoop: {
-    run(chatId: string, userInput: string): Promise<string>;
+    run(chatId: string, userInput: string): Promise<AgentRunResult>;
   };
   queue: ChatTaskQueue;
   logger: Logger;
+}
+
+async function sendImageAttachments(
+  context: MessageContext,
+  chatId: number | string | bigint,
+  result: AgentRunResult,
+  logger: Logger,
+  internalChatId: string
+): Promise<void> {
+  if (!context.api.sendPhoto || result.attachments.length === 0) {
+    return;
+  }
+
+  for (const attachment of result.attachments) {
+    if (attachment.kind !== "image") {
+      continue;
+    }
+
+    try {
+      await fs.stat(attachment.path);
+      await context.api.sendPhoto(chatId, new InputFile(attachment.path));
+    } catch (error) {
+      logger.warn("telegram.message.attachment_failed", {
+        chatId: internalChatId,
+        attachmentPath: attachment.path,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
 }
 
 export function createMessageHandler(dependencies: MessageHandlerDependencies) {
@@ -88,8 +125,9 @@ export function createMessageHandler(dependencies: MessageHandlerDependencies) {
       });
 
       await context.api.sendChatAction(chat.id, "typing");
-      const replyText = await dependencies.agentLoop.run(chatId, context.message.text);
-      await context.reply(replyText);
+      const agentResult = await dependencies.agentLoop.run(chatId, context.message.text);
+      await context.reply(agentResult.replyText);
+      await sendImageAttachments(context, chat.id, agentResult, dependencies.logger, chatId);
 
       dependencies.logger.info("telegram.message.replied", {
         chatId,

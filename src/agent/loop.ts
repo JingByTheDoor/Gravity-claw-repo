@@ -12,6 +12,16 @@ export const LOCAL_ERROR_MESSAGE =
 export const EMPTY_REPLY_MESSAGE =
   "I couldn't produce a useful reply.";
 
+export interface AgentAttachment {
+  kind: "image";
+  path: string;
+}
+
+export interface AgentRunResult {
+  replyText: string;
+  attachments: AgentAttachment[];
+}
+
 interface AgentLoopOptions {
   llmClient: LLMClient;
   toolRegistry: ToolRegistry;
@@ -77,14 +87,61 @@ function extractFavoriteColorQuestion(text: string): boolean {
   return /\bwhat(?:'s| is) my favou?rite colou?r\b/i.test(text);
 }
 
+function extractToolAttachments(
+  toolName: string,
+  rawResult: string,
+  existingPaths: Set<string>
+): AgentAttachment[] {
+  try {
+    const parsed = JSON.parse(rawResult) as Record<string, unknown>;
+    const candidatePaths: string[] = [];
+
+    if (toolName === "take_screenshot" && typeof parsed.path === "string") {
+      candidatePaths.push(parsed.path);
+    }
+
+    if (
+      (toolName === "ocr_read" || toolName === "find_element" || toolName === "wait_for_element") &&
+      typeof parsed.screenshotPath === "string"
+    ) {
+      candidatePaths.push(parsed.screenshotPath);
+    }
+
+    return candidatePaths.flatMap((candidatePath) => {
+      const trimmedPath = candidatePath.trim();
+      if (trimmedPath.length === 0 || existingPaths.has(trimmedPath)) {
+        return [];
+      }
+
+      if (!/\.(png|jpe?g|webp|bmp)$/i.test(trimmedPath)) {
+        return [];
+      }
+
+      existingPaths.add(trimmedPath);
+      return [{
+        kind: "image" as const,
+        path: trimmedPath
+      }];
+    });
+  } catch {
+    return [];
+  }
+}
+
 export class AgentLoop {
   constructor(private readonly options: AgentLoopOptions) {}
 
-  async run(chatId: string, userInput: string): Promise<string> {
+  async run(chatId: string, userInput: string): Promise<AgentRunResult> {
     const trimmedInput = userInput.trim();
     if (trimmedInput.length === 0) {
-      return "Please send a text message.";
+      return {
+        replyText: "Please send a text message.",
+        attachments: []
+      };
     }
+
+    const attachments: AgentAttachment[] = [];
+    const attachmentPaths = new Set<string>();
 
     try {
       const extractedFacts = extractDurableFacts(trimmedInput);
@@ -95,7 +152,10 @@ export class AgentLoop {
       const directReply = this.tryDirectReply(chatId, trimmedInput);
       if (directReply) {
         await this.persistTurn(chatId, trimmedInput, directReply);
-        return directReply;
+        return {
+          replyText: directReply,
+          attachments
+        };
       }
 
       const promptContext = this.options.memoryStore.getPromptContext(chatId, 20);
@@ -116,7 +176,10 @@ export class AgentLoop {
           const content = response.message.content.trim();
           const finalReply = content.length > 0 ? content : EMPTY_REPLY_MESSAGE;
           await this.persistTurn(chatId, trimmedInput, finalReply);
-          return finalReply;
+          return {
+            replyText: finalReply,
+            attachments
+          };
         }
 
         for (const toolCall of toolCalls) {
@@ -136,6 +199,8 @@ export class AgentLoop {
             durationMs: Date.now() - startedAt
           });
 
+          attachments.push(...extractToolAttachments(toolCall.name, result, attachmentPaths));
+
           messages.push({
             role: "tool",
             toolName: toolCall.name,
@@ -149,13 +214,19 @@ export class AgentLoop {
       });
 
       await this.persistTurn(chatId, trimmedInput, ITERATION_LIMIT_MESSAGE);
-      return ITERATION_LIMIT_MESSAGE;
+      return {
+        replyText: ITERATION_LIMIT_MESSAGE,
+        attachments
+      };
     } catch (error) {
       this.options.logger.error("agent.run.error", {
         error: error instanceof Error ? error.message : String(error)
       });
       await this.persistTurn(chatId, trimmedInput, LOCAL_ERROR_MESSAGE);
-      return LOCAL_ERROR_MESSAGE;
+      return {
+        replyText: LOCAL_ERROR_MESSAGE,
+        attachments
+      };
     }
   }
 

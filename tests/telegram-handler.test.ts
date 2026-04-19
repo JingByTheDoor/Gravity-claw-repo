@@ -12,12 +12,21 @@ import {
 } from "../src/telegram/handlers.js";
 import { createPathAccessPolicy } from "../src/tools/workspace.js";
 
+vi.mock("node:fs/promises", () => ({
+  default: {
+    stat: vi.fn(async () => ({}))
+  }
+}));
+
 describe("Telegram message handler", () => {
   it("replies to whitelisted text messages", async () => {
     const handler = createMessageHandler({
       allowedUserId: "123",
       agentLoop: {
-        run: vi.fn(async () => "pong")
+        run: vi.fn(async () => ({
+          replyText: "pong",
+          attachments: []
+        }))
       },
       queue: new ChatTaskQueue(),
       logger: createLogger("error")
@@ -42,7 +51,10 @@ describe("Telegram message handler", () => {
     const handler = createMessageHandler({
       allowedUserId: "123",
       agentLoop: {
-        run: vi.fn(async () => "pong")
+        run: vi.fn(async () => ({
+          replyText: "pong",
+          attachments: []
+        }))
       },
       queue: new ChatTaskQueue(),
       logger: createLogger("error")
@@ -65,7 +77,10 @@ describe("Telegram message handler", () => {
     const handler = createMessageHandler({
       allowedUserId: "123",
       agentLoop: {
-        run: vi.fn(async () => "pong")
+        run: vi.fn(async () => ({
+          replyText: "pong",
+          attachments: []
+        }))
       },
       queue: new ChatTaskQueue(),
       logger: createLogger("error")
@@ -82,6 +97,38 @@ describe("Telegram message handler", () => {
     });
 
     expect(reply).toHaveBeenCalledWith(TEXT_ONLY_MESSAGE);
+  });
+
+  it("sends screenshot attachments as Telegram photos", async () => {
+    const handler = createMessageHandler({
+      allowedUserId: "123",
+      agentLoop: {
+        run: vi.fn(async () => ({
+          replyText: "Here is the screenshot.",
+          attachments: [{
+            kind: "image" as const,
+            path: "C:\\temp\\screen.png"
+          }]
+        }))
+      },
+      queue: new ChatTaskQueue(),
+      logger: createLogger("error")
+    });
+
+    const reply = vi.fn(async () => undefined);
+    const sendChatAction = vi.fn(async () => undefined);
+    const sendPhoto = vi.fn(async () => undefined);
+
+    await handler({
+      from: { id: 123 },
+      chat: { id: 77 },
+      message: { text: "take screenshot" },
+      api: { sendChatAction, sendPhoto },
+      reply
+    });
+
+    expect(reply).toHaveBeenCalledWith("Here is the screenshot.");
+    expect(sendPhoto).toHaveBeenCalledTimes(1);
   });
 
   it("handles /new by resetting conversation state", async () => {
