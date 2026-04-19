@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createListFilesTool } from "../src/tools/list-files.js";
 import { createReadFileTool } from "../src/tools/read-file.js";
 import { createSearchFilesTool } from "../src/tools/search-files.js";
+import { createPathAccessPolicy } from "../src/tools/workspace.js";
 
 const tempRoots: string[] = [];
 
@@ -27,7 +28,7 @@ describe("workspace tools", () => {
     fs.mkdirSync(path.join(workspaceRoot, "notes"));
     fs.writeFileSync(path.join(workspaceRoot, "notes", "beta.txt"), "world");
 
-    const tool = createListFilesTool(workspaceRoot);
+    const tool = createListFilesTool(createPathAccessPolicy(workspaceRoot));
     const result = JSON.parse(await tool.execute({ recursive: "true" }, { chatId: "chat-1" })) as {
       ok: boolean;
       entries: string[];
@@ -43,7 +44,7 @@ describe("workspace tools", () => {
     const workspaceRoot = createTempWorkspace();
     fs.writeFileSync(path.join(workspaceRoot, "story.txt"), "line1\nline2\nline3");
 
-    const tool = createReadFileTool(workspaceRoot);
+    const tool = createReadFileTool(createPathAccessPolicy(workspaceRoot));
     const result = JSON.parse(
       await tool.execute({ path: "story.txt", start_line: "2", end_line: "3" }, { chatId: "chat-1" })
     ) as {
@@ -59,7 +60,7 @@ describe("workspace tools", () => {
     const workspaceRoot = createTempWorkspace();
     fs.writeFileSync(path.join(workspaceRoot, "notes.txt"), "alpha\norange\nbravo");
 
-    const tool = createSearchFilesTool(workspaceRoot);
+    const tool = createSearchFilesTool(createPathAccessPolicy(workspaceRoot));
     const result = JSON.parse(
       await tool.execute({ query: "orange" }, { chatId: "chat-1" })
     ) as {
@@ -73,5 +74,43 @@ describe("workspace tools", () => {
       line: 2,
       content: "orange"
     });
+  });
+
+  it("allows absolute paths inside extra trusted roots", async () => {
+    const workspaceRoot = createTempWorkspace();
+    const extraRoot = createTempWorkspace();
+    const outsideFile = path.join(extraRoot, "outside.txt");
+    fs.writeFileSync(outsideFile, "trusted");
+
+    const tool = createReadFileTool(createPathAccessPolicy(workspaceRoot, [extraRoot]));
+    const result = JSON.parse(
+      await tool.execute({ path: outsideFile }, { chatId: "chat-1" })
+    ) as {
+      ok: boolean;
+      path: string;
+      content: string;
+    };
+
+    expect(result.ok).toBe(true);
+    expect(result.path).toBe(path.resolve(outsideFile));
+    expect(result.content).toBe("trusted");
+  });
+
+  it("rejects paths outside trusted roots", async () => {
+    const workspaceRoot = createTempWorkspace();
+    const outsideRoot = createTempWorkspace();
+    const outsideFile = path.join(outsideRoot, "blocked.txt");
+    fs.writeFileSync(outsideFile, "blocked");
+
+    const tool = createReadFileTool(createPathAccessPolicy(workspaceRoot));
+    const result = JSON.parse(
+      await tool.execute({ path: outsideFile }, { chatId: "chat-1" })
+    ) as {
+      ok: boolean;
+      error: string;
+    };
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("outside the allowed local roots");
   });
 });

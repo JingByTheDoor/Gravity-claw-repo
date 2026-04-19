@@ -10,6 +10,7 @@ import { MemoryStore } from "../memory/store.js";
 import { createBot } from "../telegram/bot.js";
 import { createDefaultToolRegistry } from "../tools/registry.js";
 import { ShellRunner } from "../tools/shell-runner.js";
+import { createPathAccessPolicy } from "../tools/workspace.js";
 
 export interface AppServices {
   env: AppEnv;
@@ -28,12 +29,13 @@ export async function buildApp(env: AppEnv = loadEnv()): Promise<AppServices> {
 
   const logger = createLogger(env.logLevel);
   const workspaceRoot = env.workspaceRoot ?? process.cwd();
+  const pathAccessPolicy = createPathAccessPolicy(workspaceRoot, env.toolAllowedRoots);
   const memoryStore = new MemoryStore(env.databasePath, logger);
   const approvalStore = new ApprovalStore();
   const shellRunner = new ShellRunner();
   const toolRegistry = createDefaultToolRegistry({
     memoryStore,
-    workspaceRoot,
+    pathAccessPolicy,
     approvalStore,
     shellRunner,
     logger
@@ -62,7 +64,7 @@ export async function buildApp(env: AppEnv = loadEnv()): Promise<AppServices> {
     memoryStore,
     approvalStore,
     shellRunner,
-    workspaceRoot,
+    pathAccessPolicy,
     queue,
     logger
   });
@@ -92,7 +94,8 @@ export async function startApp(app: AppServices): Promise<void> {
             botUsername: botInfo.username ?? "",
             ollamaModel: app.env.ollamaModel,
             databasePath: app.env.databasePath,
-            workspaceRoot: app.env.workspaceRoot ?? process.cwd()
+            workspaceRoot: app.env.workspaceRoot ?? process.cwd(),
+            toolAllowedRoots: app.env.toolAllowedRoots
           }
         })
       );

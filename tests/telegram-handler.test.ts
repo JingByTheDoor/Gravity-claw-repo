@@ -10,6 +10,7 @@ import {
   NEW_CHAT_MESSAGE,
   TEXT_ONLY_MESSAGE
 } from "../src/telegram/handlers.js";
+import { createPathAccessPolicy } from "../src/tools/workspace.js";
 
 describe("Telegram message handler", () => {
   it("replies to whitelisted text messages", async () => {
@@ -130,7 +131,7 @@ describe("Telegram message handler", () => {
       allowedUserId: "123",
       approvalStore,
       shellRunner: shellRunner as never,
-      workspaceRoot: process.cwd(),
+      pathAccessPolicy: createPathAccessPolicy(process.cwd()),
       queue: new ChatTaskQueue(),
       logger: createLogger("error")
     });
@@ -156,7 +157,7 @@ describe("Telegram message handler", () => {
       allowedUserId: "123",
       approvalStore,
       shellRunner: { executeApproval: vi.fn() } as never,
-      workspaceRoot: process.cwd(),
+      pathAccessPolicy: createPathAccessPolicy(process.cwd()),
       queue: new ChatTaskQueue(),
       logger: createLogger("error")
     });

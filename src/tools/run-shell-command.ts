@@ -2,10 +2,10 @@ import type { ToolDefinition } from "../agent/types.js";
 import { ApprovalStore } from "../approvals/store.js";
 import type { Logger } from "../logging/logger.js";
 import { isSafeShellCommand, ShellRunner } from "./shell-runner.js";
-import { resolveWorkspacePath, toWorkspaceRelativePath } from "./workspace.js";
+import { describeAccessiblePath, type PathAccessPolicy, resolveAccessiblePath } from "./workspace.js";
 
 export function createRunShellCommandTool(
-  workspaceRoot: string,
+  pathAccessPolicy: PathAccessPolicy,
   approvalStore: ApprovalStore,
   shellRunner: ShellRunner,
   logger: Logger
@@ -13,7 +13,7 @@ export function createRunShellCommandTool(
   return {
     name: "run_shell_command",
     description:
-      "Run a local shell command in the workspace. Read-only commands can run immediately. Other commands require user approval first.",
+      "Run a local shell command inside trusted local roots. Relative cwd uses the default workspace root; absolute cwd must stay inside allowed roots. Read-only commands can run immediately. Other commands require user approval first.",
     parameters: {
       type: "object",
       properties: {
@@ -23,47 +23,54 @@ export function createRunShellCommandTool(
         },
         cwd: {
           type: "string",
-          description: "Optional relative working directory inside the workspace."
+          description: "Optional relative working directory in the default root, or an absolute directory inside allowed roots."
         }
       },
       required: ["command"],
       additionalProperties: false
     },
     async execute(input, context) {
-      const command = input.command;
-      if (typeof command !== "string" || command.trim().length === 0) {
-        return JSON.stringify({ ok: false, error: "Command must be a non-empty string." });
-      }
+      try {
+        const command = input.command;
+        if (typeof command !== "string" || command.trim().length === 0) {
+          return JSON.stringify({ ok: false, error: "Command must be a non-empty string." });
+        }
 
-      const cwd = resolveWorkspacePath(
-        workspaceRoot,
-        typeof input.cwd === "string" ? input.cwd : "."
-      );
+        const cwd = resolveAccessiblePath(
+          pathAccessPolicy,
+          typeof input.cwd === "string" ? input.cwd : "."
+        );
 
-      if (!isSafeShellCommand(command)) {
-        const approval = approvalStore.createShellApproval(context.chatId, command.trim(), cwd);
+        if (!isSafeShellCommand(command)) {
+          const approval = approvalStore.createShellApproval(context.chatId, command.trim(), cwd);
+          return JSON.stringify({
+            ok: false,
+            approvalRequired: true,
+            approvalId: approval.id,
+            message: `Command requires approval. Ask the user to send /approve ${approval.id} or /deny ${approval.id}.`,
+            cwd: describeAccessiblePath(pathAccessPolicy, cwd)
+          });
+        }
+
+        logger.info("shell.command.safe", {
+          chatId: context.chatId,
+          cwd: describeAccessiblePath(pathAccessPolicy, cwd)
+        });
+
+        const result = await shellRunner.execute(command.trim(), cwd);
+        return JSON.stringify({
+          ok: result.ok,
+          exitCode: result.exitCode,
+          stdout: result.stdout,
+          stderr: result.stderr,
+          cwd: describeAccessiblePath(pathAccessPolicy, cwd)
+        });
+      } catch (error) {
         return JSON.stringify({
           ok: false,
-          approvalRequired: true,
-          approvalId: approval.id,
-          message: `Command requires approval. Ask the user to send /approve ${approval.id} or /deny ${approval.id}.`,
-          cwd: toWorkspaceRelativePath(workspaceRoot, cwd)
+          error: error instanceof Error ? error.message : String(error)
         });
       }
-
-      logger.info("shell.command.safe", {
-        chatId: context.chatId,
-        cwd: toWorkspaceRelativePath(workspaceRoot, cwd)
-      });
-
-      const result = await shellRunner.execute(command.trim(), cwd);
-      return JSON.stringify({
-        ok: result.ok,
-        exitCode: result.exitCode,
-        stdout: result.stdout,
-        stderr: result.stderr,
-        cwd: toWorkspaceRelativePath(workspaceRoot, cwd)
-      });
     }
   };
 }

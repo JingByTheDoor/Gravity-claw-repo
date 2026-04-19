@@ -1,19 +1,82 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 const IGNORED_SEGMENTS = new Set([".git", "node_modules", "dist"]);
+
+export interface PathAccessPolicy {
+  defaultRoot: string;
+  allowedRoots: string[];
+}
 
 function normalizeSlashes(value: string): string {
   return value.replace(/[\\/]+/g, path.sep);
 }
 
-export function resolveWorkspacePath(workspaceRoot: string, relativePath = "."): string {
-  const resolvedRoot = path.resolve(workspaceRoot);
-  const safeRelativePath = normalizeSlashes(relativePath.trim() || ".");
-  const resolvedPath = path.resolve(resolvedRoot, safeRelativePath);
+function expandHomePath(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed === "~") {
+    return os.homedir();
+  }
 
-  if (resolvedPath !== resolvedRoot && !resolvedPath.startsWith(`${resolvedRoot}${path.sep}`)) {
-    throw new Error("Path escapes the workspace root.");
+  if (trimmed.startsWith(`~${path.sep}`) || trimmed.startsWith("~/") || trimmed.startsWith("~\\")) {
+    return path.join(os.homedir(), trimmed.slice(2));
+  }
+
+  return trimmed;
+}
+
+function normalizeForComparison(value: string): string {
+  return process.platform === "win32" ? value.toLowerCase() : value;
+}
+
+function isPathInsideRoot(targetPath: string, rootPath: string): boolean {
+  const resolvedTarget = path.resolve(targetPath);
+  const resolvedRoot = path.resolve(rootPath);
+  const normalizedTarget = normalizeForComparison(resolvedTarget);
+  const normalizedRoot = normalizeForComparison(resolvedRoot);
+
+  return (
+    normalizedTarget === normalizedRoot ||
+    normalizedTarget.startsWith(`${normalizedRoot}${path.sep}`)
+  );
+}
+
+export function createPathAccessPolicy(
+  defaultRoot: string,
+  extraRoots: string[] = []
+): PathAccessPolicy {
+  const roots = [defaultRoot, ...extraRoots]
+    .map((root) => expandHomePath(root))
+    .filter((root) => root.length > 0)
+    .map((root) => path.resolve(root));
+
+  return {
+    defaultRoot: roots[0] ?? path.resolve(defaultRoot),
+    allowedRoots: [...new Set(roots)]
+  };
+}
+
+export function resolveAccessiblePath(policy: PathAccessPolicy, inputPath = "."): string {
+  const trimmedInput = inputPath.trim() || ".";
+  const normalizedInput = normalizeSlashes(expandHomePath(trimmedInput));
+  const candidatePath = path.isAbsolute(normalizedInput)
+    ? path.resolve(normalizedInput)
+    : path.resolve(policy.defaultRoot, normalizedInput);
+
+  if (!policy.allowedRoots.some((root) => isPathInsideRoot(candidatePath, root))) {
+    throw new Error("Path is outside the allowed local roots.");
+  }
+
+  return candidatePath;
+}
+
+export function describeAccessiblePath(policy: PathAccessPolicy, absolutePath: string): string {
+  const resolvedPath = path.resolve(absolutePath);
+  const relativePath = path.relative(policy.defaultRoot, resolvedPath);
+
+  if (isPathInsideRoot(resolvedPath, policy.defaultRoot)) {
+    return relativePath.length === 0 ? "." : relativePath.split(path.sep).join("/");
   }
 
   return resolvedPath;

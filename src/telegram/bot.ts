@@ -5,6 +5,7 @@ import type { ApprovalStore } from "../approvals/store.js";
 import type { Logger } from "../logging/logger.js";
 import type { MemoryStoreLike } from "../memory/store.js";
 import type { ShellRunner } from "../tools/shell-runner.js";
+import type { PathAccessPolicy } from "../tools/workspace.js";
 import {
   createApproveCommandHandler,
   createDenyCommandHandler,
@@ -19,7 +20,7 @@ interface CreateBotOptions {
   memoryStore: MemoryStoreLike;
   approvalStore: ApprovalStore;
   shellRunner: ShellRunner;
-  workspaceRoot: string;
+  pathAccessPolicy: PathAccessPolicy;
   queue: ChatTaskQueue;
   logger: Logger;
 }
@@ -36,7 +37,7 @@ export function createBot(options: CreateBotOptions): Bot {
     allowedUserId: options.allowedUserId,
     approvalStore: options.approvalStore,
     shellRunner: options.shellRunner,
-    workspaceRoot: options.workspaceRoot,
+    pathAccessPolicy: options.pathAccessPolicy,
     queue: options.queue,
     logger: options.logger
   });
@@ -44,7 +45,7 @@ export function createBot(options: CreateBotOptions): Bot {
     allowedUserId: options.allowedUserId,
     approvalStore: options.approvalStore,
     shellRunner: options.shellRunner,
-    workspaceRoot: options.workspaceRoot,
+    pathAccessPolicy: options.pathAccessPolicy,
     queue: options.queue,
     logger: options.logger
   });

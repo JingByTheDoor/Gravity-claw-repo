@@ -10,6 +10,7 @@ import { createRememberFactTool } from "./remember-fact.js";
 import { createRunShellCommandTool } from "./run-shell-command.js";
 import { createSearchFilesTool } from "./search-files.js";
 import { ShellRunner } from "./shell-runner.js";
+import type { PathAccessPolicy } from "./workspace.js";
 
 function createToolError(message: string): string {
   return JSON.stringify({
@@ -51,7 +52,7 @@ export class ToolRegistry {
 
 interface CreateDefaultToolRegistryOptions {
   memoryStore: MemoryStore;
-  workspaceRoot: string;
+  pathAccessPolicy: PathAccessPolicy;
   approvalStore: ApprovalStore;
   shellRunner: ShellRunner;
   logger: Logger;
@@ -62,11 +63,11 @@ export function createDefaultToolRegistry(options: CreateDefaultToolRegistryOpti
     createGetCurrentTimeTool(),
     createRememberFactTool(options.memoryStore),
     createRecallMemoryTool(options.memoryStore),
-    createListFilesTool(options.workspaceRoot),
-    createReadFileTool(options.workspaceRoot),
-    createSearchFilesTool(options.workspaceRoot),
+    createListFilesTool(options.pathAccessPolicy),
+    createReadFileTool(options.pathAccessPolicy),
+    createSearchFilesTool(options.pathAccessPolicy),
     createRunShellCommandTool(
-      options.workspaceRoot,
+      options.pathAccessPolicy,
       options.approvalStore,
       options.shellRunner,
       options.logger

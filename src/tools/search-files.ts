@@ -1,7 +1,12 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { ToolDefinition } from "../agent/types.js";
-import { isIgnoredPathSegment, resolveWorkspacePath, toWorkspaceRelativePath } from "./workspace.js";
+import {
+  describeAccessiblePath,
+  isIgnoredPathSegment,
+  type PathAccessPolicy,
+  resolveAccessiblePath
+} from "./workspace.js";
 
 interface SearchMatch {
   path: string;
@@ -10,7 +15,7 @@ interface SearchMatch {
 }
 
 async function searchDirectory(
-  workspaceRoot: string,
+  pathAccessPolicy: PathAccessPolicy,
   directoryPath: string,
   query: string,
   limit: number,
@@ -32,7 +37,7 @@ async function searchDirectory(
 
     const absolutePath = path.join(directoryPath, entry.name);
     if (entry.isDirectory()) {
-      await searchDirectory(workspaceRoot, absolutePath, query, limit, matches);
+      await searchDirectory(pathAccessPolicy, absolutePath, query, limit, matches);
       continue;
     }
 
@@ -49,7 +54,7 @@ async function searchDirectory(
 
       if (lines[index]?.toLowerCase().includes(query)) {
         matches.push({
-          path: toWorkspaceRelativePath(workspaceRoot, absolutePath),
+          path: describeAccessiblePath(pathAccessPolicy, absolutePath),
           line: index + 1,
           content: lines[index] ?? ""
         });
@@ -58,10 +63,10 @@ async function searchDirectory(
   }
 }
 
-export function createSearchFilesTool(workspaceRoot: string): ToolDefinition {
+export function createSearchFilesTool(pathAccessPolicy: PathAccessPolicy): ToolDefinition {
   return {
     name: "search_files",
-    description: "Search text files in the local workspace for a plain-text query.",
+    description: "Search text files in trusted local roots. Relative paths use the default workspace root; absolute paths must stay inside allowed roots.",
     parameters: {
       type: "object",
       properties: {
@@ -71,7 +76,7 @@ export function createSearchFilesTool(workspaceRoot: string): ToolDefinition {
         },
         path: {
           type: "string",
-          description: "Optional relative directory inside the workspace."
+          description: "Optional relative directory in the default root, or an absolute directory inside allowed roots."
         },
         limit: {
           type: "string",
@@ -82,25 +87,32 @@ export function createSearchFilesTool(workspaceRoot: string): ToolDefinition {
       additionalProperties: false
     },
     async execute(input) {
-      const rawQuery = input.query;
-      if (typeof rawQuery !== "string" || rawQuery.trim().length === 0) {
-        return JSON.stringify({ ok: false, error: "Query must be a non-empty string." });
+      try {
+        const rawQuery = input.query;
+        if (typeof rawQuery !== "string" || rawQuery.trim().length === 0) {
+          return JSON.stringify({ ok: false, error: "Query must be a non-empty string." });
+        }
+
+        const query = rawQuery.trim().toLowerCase();
+        const relativePath = typeof input.path === "string" ? input.path : ".";
+        const parsedLimit = Number.parseInt(String(input.limit ?? "20"), 10);
+        const limit = Number.isFinite(parsedLimit) ? Math.min(Math.max(parsedLimit, 1), 100) : 20;
+        const absolutePath = resolveAccessiblePath(pathAccessPolicy, relativePath);
+        const matches: SearchMatch[] = [];
+
+        await searchDirectory(pathAccessPolicy, absolutePath, query, limit, matches);
+
+        return JSON.stringify({
+          ok: true,
+          query: rawQuery.trim(),
+          matches
+        });
+      } catch (error) {
+        return JSON.stringify({
+          ok: false,
+          error: error instanceof Error ? error.message : String(error)
+        });
       }
-
-      const query = rawQuery.trim().toLowerCase();
-      const relativePath = typeof input.path === "string" ? input.path : ".";
-      const parsedLimit = Number.parseInt(String(input.limit ?? "20"), 10);
-      const limit = Number.isFinite(parsedLimit) ? Math.min(Math.max(parsedLimit, 1), 100) : 20;
-      const absolutePath = resolveWorkspacePath(workspaceRoot, relativePath);
-      const matches: SearchMatch[] = [];
-
-      await searchDirectory(workspaceRoot, absolutePath, query, limit, matches);
-
-      return JSON.stringify({
-        ok: true,
-        query: rawQuery.trim(),
-        matches
-      });
     }
   };
 }

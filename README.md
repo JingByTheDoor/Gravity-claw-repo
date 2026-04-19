@@ -39,6 +39,7 @@ Level 4 tools-ready foundation for a local-first Telegram AI agent.
 3. Make sure Ollama is running and the configured model exists
 4. Optional: change `DATABASE_PATH` if you do not want `gravity-claw.db` in the repo root
 5. Optional: set `WORKSPACE_ROOT` if the agent should inspect a different local folder
+6. Optional: set `TOOL_ALLOWED_ROOTS` if the agent should read or use shell cwd in additional local folders outside the default workspace root
 6. Install dependencies:
 
 ```bash
@@ -68,3 +69,4 @@ npm run build
 - Use `/new` in Telegram to start a fresh chat session while keeping durable memory facts.
 - Use `/approve <id>` or `/deny <id>` for shell commands that require confirmation.
 - Read-only shell commands may run immediately; mutating or unclear commands require approval first.
+- By default, file tools stay in `WORKSPACE_ROOT`. Add `TOOL_ALLOWED_ROOTS` in `.env` to let the bot inspect extra trusted folders with absolute paths.

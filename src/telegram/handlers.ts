@@ -3,7 +3,7 @@ import type { ApprovalStore } from "../approvals/store.js";
 import type { Logger } from "../logging/logger.js";
 import type { MemoryStoreLike } from "../memory/store.js";
 import type { ShellRunner } from "../tools/shell-runner.js";
-import { toWorkspaceRelativePath } from "../tools/workspace.js";
+import { describeAccessiblePath, type PathAccessPolicy } from "../tools/workspace.js";
 import { isAuthorizedUser } from "./auth.js";
 
 export const TEXT_ONLY_MESSAGE = "Level 1 supports text messages only.";
@@ -132,7 +132,7 @@ interface ApprovalCommandDependencies {
   allowedUserId: string;
   approvalStore: ApprovalStore;
   shellRunner: ShellRunner;
-  workspaceRoot: string;
+  pathAccessPolicy: PathAccessPolicy;
   queue: ChatTaskQueue;
   logger: Logger;
 }
@@ -163,7 +163,7 @@ export function createApproveCommandHandler(dependencies: ApprovalCommandDepende
       });
 
       const result = await dependencies.shellRunner.executeApproval(approval);
-      const cwd = toWorkspaceRelativePath(dependencies.workspaceRoot, approval.cwd);
+      const cwd = describeAccessiblePath(dependencies.pathAccessPolicy, approval.cwd);
       const replyLines = [
         `Approved command ${approval.id}.`,
         `cwd: ${cwd}`,

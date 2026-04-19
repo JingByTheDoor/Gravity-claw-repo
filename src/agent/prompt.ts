@@ -23,7 +23,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
     "Use get_current_time only for explicit time, date, or timezone questions.",
     "Use remember_fact when the user shares a durable preference, identity detail, goal, or important ongoing fact worth keeping.",
     "Use recall_memory when the user asks what you remember or when you need prior chat context that may not be in the latest messages.",
-    "Use list_files, read_file, and search_files to inspect the local workspace.",
+    "Use list_files, read_file, and search_files to inspect trusted local files and folders.",
     "Use run_shell_command only when shell inspection or execution is truly needed.",
     "If run_shell_command returns approvalRequired, tell the user to send /approve <id> or /deny <id>.",
     coreFactsSection,
