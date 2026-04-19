@@ -242,10 +242,51 @@ describe("AgentLoop", () => {
     });
 
     await expect(loop.run("chat-1", "take a screenshot")).resolves.toEqual({
-      replyText: "Here is the screenshot.",
+      replyText: "Attached the screenshot.",
       attachments: [{
         kind: "image",
         path: "C:\\temp\\screen.png"
+      }]
+    });
+  });
+
+  it("takes simple screenshot requests directly without waiting for the model", async () => {
+    const llmClient: LLMClient = {
+      checkHealth: vi.fn(async () => undefined),
+      runStep: vi.fn(async (): Promise<LLMRunResponse> => {
+        throw new Error("LLM should not run for direct screenshot requests");
+      })
+    };
+
+    const loop = new AgentLoop({
+      llmClient,
+      toolRegistry: new ToolRegistry([{
+        name: "take_screenshot",
+        description: "test screenshot",
+        parameters: {
+          type: "object",
+          properties: {},
+          additionalProperties: false
+        },
+        execute: vi.fn(async () =>
+          JSON.stringify({
+            ok: true,
+            path: "C:\\temp\\direct-shot.png"
+          })
+        )
+      }]),
+      memoryStore: createMemoryStoreStub(),
+      maxIterations: 4,
+      logger: createLogger("error")
+    });
+
+    await expect(
+      loop.run("chat-1", "take a screenshot right now and upload it into telegram as your message")
+    ).resolves.toEqual({
+      replyText: "Attached the screenshot.",
+      attachments: [{
+        kind: "image",
+        path: "C:\\temp\\direct-shot.png"
       }]
     });
   });

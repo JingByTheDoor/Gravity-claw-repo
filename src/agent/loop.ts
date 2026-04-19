@@ -87,6 +87,23 @@ function extractFavoriteColorQuestion(text: string): boolean {
   return /\bwhat(?:'s| is) my favou?rite colou?r\b/i.test(text);
 }
 
+function isSimpleScreenshotRequest(text: string): boolean {
+  const normalized = text.trim().toLowerCase();
+  if (!/\b(screen ?shot|screenshot)\b/.test(normalized)) {
+    return false;
+  }
+
+  if (
+    /\b(ocr|find element|wait for element|read the text|text on screen|what(?:'s| is) on screen)\b/.test(
+      normalized
+    )
+  ) {
+    return false;
+  }
+
+  return /\b(take|capture|grab|send|upload|attach|show)\b/.test(normalized);
+}
+
 function extractToolAttachments(
   toolName: string,
   rawResult: string,
@@ -156,6 +173,12 @@ export class AgentLoop {
           replyText: directReply,
           attachments
         };
+      }
+
+      const directActionResult = await this.tryDirectAction(chatId, trimmedInput);
+      if (directActionResult) {
+        await this.persistTurn(chatId, trimmedInput, directActionResult.replyText);
+        return directActionResult;
       }
 
       const promptContext = this.options.memoryStore.getPromptContext(chatId, 20);
@@ -246,6 +269,50 @@ export class AgentLoop {
     }
 
     return undefined;
+  }
+
+  private async tryDirectAction(
+    chatId: string,
+    userInput: string
+  ): Promise<AgentRunResult | undefined> {
+    if (isSimpleScreenshotRequest(userInput)) {
+      return this.takeDirectScreenshot(chatId);
+    }
+
+    return undefined;
+  }
+
+  private async takeDirectScreenshot(chatId: string): Promise<AgentRunResult> {
+    const rawResult = await this.options.toolRegistry.execute("take_screenshot", {}, { chatId });
+    const attachmentPaths = new Set<string>();
+    const attachments = extractToolAttachments("take_screenshot", rawResult, attachmentPaths);
+
+    try {
+      const parsed = JSON.parse(rawResult) as Record<string, unknown>;
+      if (parsed.ok === false) {
+        return {
+          replyText:
+            typeof parsed.error === "string"
+              ? `I couldn't take the screenshot: ${parsed.error}`
+              : LOCAL_ERROR_MESSAGE,
+          attachments: []
+        };
+      }
+
+      if (attachments.length > 0) {
+        return {
+          replyText: "Attached the screenshot.",
+          attachments
+        };
+      }
+    } catch {
+      // fall through to a safe fallback reply below
+    }
+
+    return {
+      replyText: "I took the screenshot, but I couldn't attach it in the reply.",
+      attachments
+    };
   }
 
   private buildMessages(promptContext: MemoryPromptContext, userInput: string): AgentMessage[] {
