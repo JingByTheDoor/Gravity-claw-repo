@@ -17,6 +17,7 @@ import type { LLMClient } from "../llm/client.js";
 import type { TaskRouter } from "../llm/task-router.js";
 import type { Logger } from "../logging/logger.js";
 import type { MemoryFact, MemoryPromptContext, MemoryStoreLike } from "../memory/store.js";
+import type { ApprovalRequest } from "../runtime/contracts.js";
 import type { ToolRegistry } from "../tools/registry.js";
 
 export const ITERATION_LIMIT_MESSAGE =
@@ -33,8 +34,10 @@ export interface AgentAttachment {
 }
 
 export interface AgentRunResult {
+  state: "completed" | "waiting_approval" | "failed" | "canceled";
   replyText: string;
   attachments: AgentAttachment[];
+  pendingApproval?: ApprovalRequest;
 }
 
 interface AgentLoopOptions {
@@ -193,6 +196,58 @@ function extractToolAttachments(
   }
 }
 
+function extractPendingApproval(rawResult: string, chatId: string): ApprovalRequest | undefined {
+  try {
+    const parsed = JSON.parse(rawResult) as Record<string, unknown>;
+    if (parsed.approvalRequired !== true || typeof parsed.approvalId !== "string") {
+      return undefined;
+    }
+
+    const kind = parsed.kind === "external_action" ? "external_action" : "shell_command";
+    const title =
+      typeof parsed.title === "string" && parsed.title.trim().length > 0
+        ? parsed.title.trim()
+        : kind === "external_action"
+          ? "External action approval"
+          : "Shell command approval";
+    const details =
+      typeof parsed.details === "string" && parsed.details.trim().length > 0
+        ? parsed.details.trim()
+        : typeof parsed.message === "string"
+          ? parsed.message.trim()
+          : title;
+    const taskId =
+      typeof parsed.taskId === "string" && parsed.taskId.trim().length > 0
+        ? parsed.taskId.trim()
+        : undefined;
+
+    return {
+      id: parsed.approvalId,
+      kind,
+      chatId,
+      ...(taskId ? { taskId } : {}),
+      title,
+      details,
+      createdAt: new Date().toISOString()
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function readApprovalMessage(rawResult: string, approvalId: string): string {
+  try {
+    const parsed = JSON.parse(rawResult) as Record<string, unknown>;
+    if (typeof parsed.message === "string" && parsed.message.trim().length > 0) {
+      return parsed.message.trim();
+    }
+  } catch {
+    // ignore parse failure and use the safe fallback below
+  }
+
+  return `Action requires approval. Send /approve ${approvalId} or /deny ${approvalId}.`;
+}
+
 function formatSteeringMessage(steeringMessages: string[]): string {
   return [
     "Live steering for the current task.",
@@ -224,6 +279,7 @@ export class AgentLoop {
     const trimmedInput = userInput.trim();
     if (trimmedInput.length === 0) {
       return {
+        state: "completed",
         replyText: "Please send a text message.",
         attachments: []
       };
@@ -266,6 +322,7 @@ export class AgentLoop {
         await this.emitProgress(runOptions, PREPARING_REPLY_PROGRESS_MESSAGE);
         await this.persistTurn(chatId, trimmedInput, directReply);
         return {
+          state: "completed",
           replyText: directReply,
           attachments
         };
@@ -365,6 +422,7 @@ export class AgentLoop {
             finalReply
           );
           return {
+            state: "completed",
             replyText: finalReply,
             attachments
           };
@@ -394,6 +452,7 @@ export class AgentLoop {
 
           const result = await this.options.toolRegistry.execute(toolCall.name, toolCall.arguments, {
             chatId,
+            ...(runOptions.taskId ? { taskId: runOptions.taskId } : {}),
             ...(runOptions.shouldCancel ? { shouldCancel: runOptions.shouldCancel } : {})
           });
 
@@ -408,6 +467,7 @@ export class AgentLoop {
           );
 
           attachments.push(...extractToolAttachments(toolCall.name, result, attachmentPaths));
+          const pendingApproval = extractPendingApproval(result, chatId);
 
           const canceledAfterTool = await this.finishIfCanceled(
             chatId,
@@ -418,6 +478,22 @@ export class AgentLoop {
           );
           if (canceledAfterTool) {
             return canceledAfterTool;
+          }
+
+          if (pendingApproval) {
+            const replyText = readApprovalMessage(result, pendingApproval.id);
+            await this.emitProgress(runOptions, PREPARING_REPLY_PROGRESS_MESSAGE);
+            await this.persistTurn(
+              chatId,
+              mergeSteeringIntoUserInput(trimmedInput, appliedSteeringMessages),
+              replyText
+            );
+            return {
+              state: "waiting_approval",
+              replyText,
+              attachments,
+              pendingApproval
+            };
           }
 
           messages.push({
@@ -439,6 +515,7 @@ export class AgentLoop {
         ITERATION_LIMIT_MESSAGE
       );
       return {
+        state: "completed",
         replyText: ITERATION_LIMIT_MESSAGE,
         attachments
       };
@@ -455,6 +532,7 @@ export class AgentLoop {
         LOCAL_ERROR_MESSAGE
       );
       return {
+        state: "failed",
         replyText: LOCAL_ERROR_MESSAGE,
         attachments
       };
@@ -504,7 +582,10 @@ export class AgentLoop {
     runOptions: AgentRunOptions
   ): Promise<AgentRunResult> {
     await this.emitProgress(runOptions, formatToolStartProgressMessage("take_screenshot", {}));
-    const rawResult = await this.options.toolRegistry.execute("take_screenshot", {}, { chatId });
+    const rawResult = await this.options.toolRegistry.execute("take_screenshot", {}, {
+      chatId,
+      ...(runOptions.taskId ? { taskId: runOptions.taskId } : {})
+    });
     await this.emitProgress(
       runOptions,
       formatToolFinishedProgressMessage("take_screenshot", {}, rawResult)
@@ -516,6 +597,7 @@ export class AgentLoop {
       const parsed = JSON.parse(rawResult) as Record<string, unknown>;
       if (parsed.ok === false) {
         return {
+          state: "failed",
           replyText:
             typeof parsed.error === "string"
               ? `I couldn't take the screenshot: ${parsed.error}`
@@ -526,6 +608,7 @@ export class AgentLoop {
 
       if (attachments.length > 0) {
         return {
+          state: "completed",
           replyText: "Attached the screenshot.",
           attachments
         };
@@ -535,6 +618,7 @@ export class AgentLoop {
     }
 
     return {
+      state: "completed",
       replyText: "I took the screenshot, but I couldn't attach it in the reply.",
       attachments
     };
@@ -610,6 +694,7 @@ export class AgentLoop {
       CANCELED_MESSAGE
     );
     return {
+      state: "canceled",
       replyText: CANCELED_MESSAGE,
       attachments
     };

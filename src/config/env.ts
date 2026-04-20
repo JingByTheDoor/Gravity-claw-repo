@@ -12,6 +12,28 @@ const envSchema = z.object({
   OLLAMA_MODEL: z.string().trim().min(1).default("qwen2.5:3b"),
   OLLAMA_FAST_MODEL: z.string().trim().min(1).optional(),
   OLLAMA_VISION_MODEL: z.string().trim().min(1).optional(),
+  WORKER_LABEL: z.string().trim().min(1).default("Gravity Claw Worker"),
+  WORKER_MODE: z.enum(["local", "vm"]).default("local"),
+  WORKER_HOST_PROFILE_ROOT: z.string().trim().min(1).optional(),
+  BROWSER_USER_DATA_DIR: z.string().trim().min(1).optional(),
+  BROWSER_HEADLESS: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((value) => value === "true"),
+  EMAIL_NOTIFICATIONS_ENABLED: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
+  EMAIL_NOTIFICATION_FROM: z.string().trim().min(1).optional(),
+  EMAIL_NOTIFICATION_TO: z.string().trim().min(1).optional(),
+  SMTP_HOST: z.string().trim().min(1).optional(),
+  SMTP_PORT: z.coerce.number().int().positive().optional(),
+  SMTP_SECURE: z
+    .enum(["true", "false"])
+    .optional()
+    .transform((value) => value === undefined ? undefined : value === "true"),
+  SMTP_USER: z.string().trim().min(1).optional(),
+  SMTP_PASSWORD: z.string().trim().min(1).optional(),
   AGENT_MAX_ITERATIONS: z.coerce.number().int().min(1).max(10).default(4),
   DATABASE_PATH: z.string().trim().min(1).default("gravity-claw.db"),
   WORKSPACE_ROOT: z.string().trim().min(1).optional(),
@@ -28,6 +50,19 @@ export interface AppEnv {
   ollamaModel: string;
   ollamaFastModel: string;
   ollamaVisionModel: string;
+  workerLabel: string;
+  workerMode: "local" | "vm";
+  workerHostProfileRoot?: string;
+  browserUserDataDir?: string;
+  browserHeadless: boolean;
+  emailNotificationsEnabled: boolean;
+  emailNotificationFrom?: string;
+  emailNotificationTo?: string;
+  smtpHost?: string;
+  smtpPort?: number;
+  smtpSecure?: boolean;
+  smtpUser?: string;
+  smtpPassword?: string;
   agentMaxIterations: number;
   databasePath: string;
   workspaceRoot?: string;
@@ -79,6 +114,27 @@ export function parseEnv(source: Record<string, string | undefined>): AppEnv {
     ollamaModel,
     ollamaFastModel,
     ollamaVisionModel,
+    workerLabel: result.data.WORKER_LABEL,
+    workerMode: result.data.WORKER_MODE,
+    ...(result.data.WORKER_HOST_PROFILE_ROOT
+      ? { workerHostProfileRoot: result.data.WORKER_HOST_PROFILE_ROOT }
+      : {}),
+    ...(result.data.BROWSER_USER_DATA_DIR
+      ? { browserUserDataDir: result.data.BROWSER_USER_DATA_DIR }
+      : {}),
+    browserHeadless: result.data.BROWSER_HEADLESS,
+    emailNotificationsEnabled: result.data.EMAIL_NOTIFICATIONS_ENABLED,
+    ...(result.data.EMAIL_NOTIFICATION_FROM
+      ? { emailNotificationFrom: result.data.EMAIL_NOTIFICATION_FROM }
+      : {}),
+    ...(result.data.EMAIL_NOTIFICATION_TO
+      ? { emailNotificationTo: result.data.EMAIL_NOTIFICATION_TO }
+      : {}),
+    ...(result.data.SMTP_HOST ? { smtpHost: result.data.SMTP_HOST } : {}),
+    ...(result.data.SMTP_PORT ? { smtpPort: result.data.SMTP_PORT } : {}),
+    ...(result.data.SMTP_SECURE !== undefined ? { smtpSecure: result.data.SMTP_SECURE } : {}),
+    ...(result.data.SMTP_USER ? { smtpUser: result.data.SMTP_USER } : {}),
+    ...(result.data.SMTP_PASSWORD ? { smtpPassword: result.data.SMTP_PASSWORD } : {}),
     agentMaxIterations: result.data.AGENT_MAX_ITERATIONS,
     databasePath: result.data.DATABASE_PATH,
     ...(result.data.WORKSPACE_ROOT ? { workspaceRoot: result.data.WORKSPACE_ROOT } : {}),

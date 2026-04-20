@@ -7,6 +7,7 @@ export interface ToolCall {
 
 export interface ToolExecutionContext {
   chatId: string;
+  taskId?: string;
   shouldCancel?: () => boolean | Promise<boolean>;
 }
 

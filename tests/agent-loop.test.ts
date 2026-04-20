@@ -45,6 +45,7 @@ describe("AgentLoop", () => {
     });
 
     await expect(loop.run("chat-1", "tell me something useful")).resolves.toEqual({
+      state: "completed",
       replyText: "Hello from local Ollama.",
       attachments: []
     });
@@ -80,6 +81,7 @@ describe("AgentLoop", () => {
     });
 
     await expect(loop.run("chat-1", "What time is it in UTC?")).resolves.toEqual({
+      state: "completed",
       replyText: "It is currently UTC time.",
       attachments: []
     });
@@ -165,6 +167,7 @@ describe("AgentLoop", () => {
     const consumeSteeringMessages = vi.fn(() => steeringBatches.shift() ?? []);
 
     await expect(loop.run("chat-1", "Explain the plan", { consumeSteeringMessages })).resolves.toEqual({
+      state: "completed",
       replyText: "Short answer.",
       attachments: []
     });
@@ -252,6 +255,7 @@ describe("AgentLoop", () => {
     });
 
     await expect(loop.run("chat-1", "loop")).resolves.toEqual({
+      state: "completed",
       replyText: ITERATION_LIMIT_MESSAGE,
       attachments: []
     });
@@ -281,6 +285,7 @@ describe("AgentLoop", () => {
     });
 
     await expect(loop.run("chat-1", "what do you know about me?")).resolves.toEqual({
+      state: "completed",
       replyText: "Here's what I know about you:\n- favorite color: orange\n- timezone: America/Vancouver",
       attachments: []
     });
@@ -304,6 +309,7 @@ describe("AgentLoop", () => {
     });
 
     await expect(loop.run("chat-1", "hi")).resolves.toEqual({
+      state: "completed",
       replyText: "Hello! How can I assist you today?",
       attachments: []
     });
@@ -352,6 +358,7 @@ describe("AgentLoop", () => {
     });
 
     await expect(loop.run("chat-1", "like iterations?")).resolves.toEqual({
+      state: "completed",
       replyText:
         "My local limit here is mainly the agent step limit. I can take up to 4 tool/model steps in one message before I stop and ask you to break the task into smaller steps.",
       attachments: []
@@ -402,6 +409,7 @@ describe("AgentLoop", () => {
     });
 
     await expect(loop.run("chat-1", "take a screenshot")).resolves.toEqual({
+      state: "completed",
       replyText: "Attached the screenshot.",
       attachments: [{
         kind: "image",
@@ -444,6 +452,7 @@ describe("AgentLoop", () => {
     await expect(
       loop.run("chat-1", "take a screenshot right now and upload it into telegram as your message")
     ).resolves.toEqual({
+      state: "completed",
       replyText: "Attached the screenshot.",
       attachments: [{
         kind: "image",
@@ -491,6 +500,7 @@ describe("AgentLoop", () => {
     await expect(
       loop.run("chat-1", "open figma wait for it to load then take a full screen screenshot and describe it")
     ).resolves.toEqual({
+      state: "completed",
       replyText: "Working on the full workflow.",
       attachments: []
     });
@@ -538,6 +548,7 @@ describe("AgentLoop", () => {
     await expect(
       loop.run("chat-1", "could you find an image of a zebra online and take a screenshot of it")
     ).resolves.toEqual({
+      state: "completed",
       replyText: "I'll handle the broader task instead of taking the current screen immediately.",
       attachments: []
     });
@@ -565,6 +576,7 @@ describe("AgentLoop", () => {
     });
 
     await expect(loop.run("chat-1", "do something")).resolves.toEqual({
+      state: "failed",
       replyText: "I hit a local error before finishing. Send /last_error to inspect the most recent failure.",
       attachments: []
     });
@@ -597,6 +609,7 @@ describe("AgentLoop", () => {
     });
 
     await expect(loop.run("chat-1", "say something")).resolves.toEqual({
+      state: "completed",
       replyText: "Successful reply.",
       attachments: []
     });
@@ -644,6 +657,7 @@ describe("AgentLoop", () => {
     });
 
     await expect(loop.run("chat-1", "fix the broken build and explain why")).resolves.toEqual({
+      state: "completed",
       replyText: "Escalated task handled.",
       attachments: []
     });
@@ -687,6 +701,7 @@ describe("AgentLoop", () => {
         shouldCancel: () => true
       })
     ).resolves.toEqual({
+      state: "canceled",
       replyText: CANCELED_MESSAGE,
       attachments: []
     });
@@ -738,6 +753,7 @@ describe("AgentLoop", () => {
         }
       })
     ).resolves.toEqual({
+      state: "canceled",
       replyText: CANCELED_MESSAGE,
       attachments: []
     });

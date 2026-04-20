@@ -3,6 +3,7 @@ import { ChatTaskQueue } from "../src/agent/queue.js";
 import { ApprovalStore } from "../src/approvals/store.js";
 import { RuntimeErrorStore } from "../src/errors/runtime-error-store.js";
 import { createLogger } from "../src/logging/logger.js";
+import type { RunEvent } from "../src/runtime/contracts.js";
 import {
   createApprovalsCommandHandler,
   createApproveCommandHandler,
@@ -28,17 +29,36 @@ vi.mock("node:fs/promises", () => ({
   }
 }));
 
+function createEvent(
+  chatId: string,
+  type: RunEvent["type"],
+  message: string,
+  extra: Partial<RunEvent> = {}
+): RunEvent {
+  return {
+    taskId: "task-1",
+    chatId,
+    type,
+    message,
+    createdAt: "2026-04-20T00:00:00.000Z",
+    ...extra
+  };
+}
+
 describe("Telegram message handler", () => {
   it("replies to whitelisted text messages", async () => {
+    const submitTask = vi.fn(async (chatId: string, _input: string, sink?: { notify(event: RunEvent): Promise<void> }) => {
+      await sink?.notify(createEvent(chatId, "task_completed", "pong", { status: "completed" }));
+      return { task: { id: "task-1", chatId, userInput: "ping", status: "completed", createdAt: "", updatedAt: "" }, replyText: "pong", attachments: [] };
+    });
+
     const handler = createMessageHandler({
       allowedUserId: "123",
       allowedChatIds: [],
-      agentLoop: {
-        run: vi.fn(async () => ({
-          replyText: "pong",
-          attachments: []
-        }))
-      },
+      taskRuntime: {
+        submitTask,
+        requestCancel: vi.fn(() => false)
+      } as never,
       queue: new ChatTaskQueue(),
       logger: createLogger("error")
     });
@@ -55,6 +75,7 @@ describe("Telegram message handler", () => {
     });
 
     expect(sendChatAction).toHaveBeenCalledWith(77, "typing");
+    expect(submitTask).toHaveBeenCalledWith("77", "ping", expect.any(Object));
     expect(reply).toHaveBeenCalledWith("pong");
   });
 
@@ -62,12 +83,10 @@ describe("Telegram message handler", () => {
     const handler = createMessageHandler({
       allowedUserId: "123",
       allowedChatIds: [],
-      agentLoop: {
-        run: vi.fn(async () => ({
-          replyText: "pong",
-          attachments: []
-        }))
-      },
+      taskRuntime: {
+        submitTask: vi.fn(),
+        requestCancel: vi.fn(() => false)
+      } as never,
       queue: new ChatTaskQueue(),
       logger: createLogger("error")
     });
@@ -89,12 +108,10 @@ describe("Telegram message handler", () => {
     const handler = createMessageHandler({
       allowedUserId: "123",
       allowedChatIds: ["-1001"],
-      agentLoop: {
-        run: vi.fn(async () => ({
-          replyText: "pong",
-          attachments: []
-        }))
-      },
+      taskRuntime: {
+        submitTask: vi.fn(),
+        requestCancel: vi.fn(() => false)
+      } as never,
       queue: new ChatTaskQueue(),
       logger: createLogger("error")
     });
@@ -113,15 +130,14 @@ describe("Telegram message handler", () => {
   });
 
   it("returns the text-only fallback for unsupported messages", async () => {
+    const submitTask = vi.fn();
     const handler = createMessageHandler({
       allowedUserId: "123",
       allowedChatIds: [],
-      agentLoop: {
-        run: vi.fn(async () => ({
-          replyText: "pong",
-          attachments: []
-        }))
-      },
+      taskRuntime: {
+        submitTask,
+        requestCancel: vi.fn(() => false)
+      } as never,
       queue: new ChatTaskQueue(),
       logger: createLogger("error")
     });
@@ -136,22 +152,32 @@ describe("Telegram message handler", () => {
       reply
     });
 
+    expect(submitTask).not.toHaveBeenCalled();
     expect(reply).toHaveBeenCalledWith(TEXT_ONLY_MESSAGE);
   });
 
   it("sends screenshot attachments as Telegram photos", async () => {
+    const submitTask = vi.fn(async (chatId: string, _input: string, sink?: { notify(event: RunEvent): Promise<void> }) => {
+      await sink?.notify(createEvent(chatId, "task_completed", "Here is the screenshot.", { status: "completed" }));
+      await sink?.notify(createEvent(chatId, "artifact_recorded", "screen.png", {
+        status: "completed",
+        artifact: {
+          kind: "image",
+          path: "C:\\temp\\screen.png",
+          label: "screen.png"
+        }
+      }));
+
+      return { task: { id: "task-1", chatId, userInput: "take screenshot", status: "completed", createdAt: "", updatedAt: "" }, replyText: "Here is the screenshot.", attachments: [] };
+    });
+
     const handler = createMessageHandler({
       allowedUserId: "123",
       allowedChatIds: [],
-      agentLoop: {
-        run: vi.fn(async () => ({
-          replyText: "Here is the screenshot.",
-          attachments: [{
-            kind: "image" as const,
-            path: "C:\\temp\\screen.png"
-          }]
-        }))
-      },
+      taskRuntime: {
+        submitTask,
+        requestCancel: vi.fn(() => false)
+      } as never,
       queue: new ChatTaskQueue(),
       logger: createLogger("error")
     });
@@ -173,20 +199,20 @@ describe("Telegram message handler", () => {
   });
 
   it("forwards progress updates as separate Telegram messages", async () => {
+    const submitTask = vi.fn(async (chatId: string, _input: string, sink?: { notify(event: RunEvent): Promise<void> }) => {
+      await sink?.notify(createEvent(chatId, "progress", 'Status: opening "Figma"', { status: "running" }));
+      await sink?.notify(createEvent(chatId, "progress", 'Status: opened "Figma"', { status: "running" }));
+      await sink?.notify(createEvent(chatId, "task_completed", "Done.", { status: "completed" }));
+      return { task: { id: "task-1", chatId, userInput: "open figma", status: "completed", createdAt: "", updatedAt: "" }, replyText: "Done.", attachments: [] };
+    });
+
     const handler = createMessageHandler({
       allowedUserId: "123",
       allowedChatIds: [],
-      agentLoop: {
-        run: vi.fn(async (_chatId: string, _userInput: string, options) => {
-          await options?.onProgress?.('Status: opening "Figma"');
-          await options?.onProgress?.('Status: opening "Figma"');
-          await options?.onProgress?.('Status: opened "Figma"');
-          return {
-            replyText: "Done.",
-            attachments: []
-          };
-        })
-      },
+      taskRuntime: {
+        submitTask,
+        requestCancel: vi.fn(() => false)
+      } as never,
       queue: new ChatTaskQueue(),
       logger: createLogger("error")
     });
@@ -213,6 +239,7 @@ describe("Telegram message handler", () => {
   it("treats a second mid-run message as live steering instead of a new queued turn", async () => {
     let resolveRun!: () => void;
     let markRunStarted!: () => void;
+    let observedSteering: string[] = [];
     const runBlocked = new Promise<void>((resolve) => {
       resolveRun = resolve;
     });
@@ -220,22 +247,25 @@ describe("Telegram message handler", () => {
       markRunStarted = resolve;
     });
 
-    const agentLoopRun = vi.fn(async (_chatId: string, _userInput: string, options) => {
+    const queue = new ChatTaskQueue();
+    const submitTask = vi.fn(async (chatId: string, _input: string, sink?: { notify(event: RunEvent): Promise<void> }) => {
+      queue.beginActiveRun(chatId);
       markRunStarted();
       await runBlocked;
-      return {
-        replyText: "Done.",
-        attachments: []
-      };
+      observedSteering = queue.consumeSteeringMessages(chatId);
+      queue.endActiveRun(chatId);
+      await sink?.notify(createEvent(chatId, "task_completed", "Done.", { status: "completed" }));
+      return { task: { id: "task-1", chatId, userInput: "start the task", status: "completed", createdAt: "", updatedAt: "" }, replyText: "Done.", attachments: [] };
     });
 
     const handler = createMessageHandler({
       allowedUserId: "123",
       allowedChatIds: [],
-      agentLoop: {
-        run: agentLoopRun
-      },
-      queue: new ChatTaskQueue(),
+      taskRuntime: {
+        submitTask,
+        requestCancel: vi.fn(() => false)
+      } as never,
+      queue,
       logger: createLogger("error")
     });
 
@@ -260,15 +290,13 @@ describe("Telegram message handler", () => {
       reply: secondReply
     });
 
-    expect(agentLoopRun).toHaveBeenCalledTimes(1);
+    expect(submitTask).toHaveBeenCalledTimes(1);
     expect(secondReply).toHaveBeenCalledWith(LIVE_STEERING_MESSAGE);
-
-    const firstRunOptions = agentLoopRun.mock.calls[0]?.[2];
-    expect(firstRunOptions?.consumeSteeringMessages?.()).toEqual(["also keep the reply short"]);
 
     resolveRun();
     await firstMessagePromise;
 
+    expect(observedSteering).toEqual(["also keep the reply short"]);
     expect(firstReply).toHaveBeenCalledWith("Done.");
   });
 
@@ -342,6 +370,17 @@ describe("Telegram message handler", () => {
           ollamaVisionModel: "gemma4:latest",
           fastRoutingEnabled: true,
           pendingApprovalCount: 1,
+          workerLabel: "Gravity Claw Worker",
+          workerMode: "vm" as const,
+          browserProfileDir: "C:/bot/browser",
+          taskCounts: {
+            queued: 0,
+            running: 1,
+            waiting_approval: 1,
+            completed: 5,
+            failed: 0,
+            canceled: 0
+          },
           latestLocalErrorAt: "2026-04-20T02:31:56.000Z",
           latestLocalErrorScope: "agent.run"
         }))
@@ -358,6 +397,7 @@ describe("Telegram message handler", () => {
     });
 
     expect(reply).toHaveBeenCalledWith(expect.stringContaining("Vision model: gemma4:latest"));
+    expect(reply).toHaveBeenCalledWith(expect.stringContaining("Worker: Gravity Claw Worker (vm)"));
     expect(reply).toHaveBeenCalledWith(expect.stringContaining("Pending approvals in this chat: 1"));
   });
 
@@ -384,25 +424,31 @@ describe("Telegram message handler", () => {
     expect(reply).toHaveBeenCalledWith(expect.stringContaining("npm install"));
   });
 
-  it("approves a pending command and returns output", async () => {
+  it("approves a pending command and returns output for orphaned approvals", async () => {
     const approvalStore = new ApprovalStore();
     const approval = approvalStore.createShellApproval("77", "git status", process.cwd());
-    const shellRunner = {
-      executeApproval: vi.fn(async () => ({
-        ok: true,
-        exitCode: 0,
-        stdout: "status ok",
-        stderr: ""
-      }))
-    };
+    const approvePending = vi.fn(async () => ({
+      task: {
+        id: "task-approval",
+        chatId: "77",
+        userInput: "approval",
+        status: "completed",
+        createdAt: "",
+        updatedAt: ""
+      },
+      replyText: `Approved command ${approval.id}.`,
+      attachments: []
+    }));
 
     const handler = createApproveCommandHandler({
       allowedUserId: "123",
       allowedChatIds: [],
       approvalStore,
-      shellRunner: shellRunner as never,
-      pathAccessPolicy: createPathAccessPolicy(process.cwd()),
-      queue: new ChatTaskQueue(),
+      taskRuntime: {
+        approvePending,
+        denyPending: vi.fn(),
+        requestCancel: vi.fn(() => false)
+      } as never,
       logger: createLogger("error")
     });
 
@@ -416,20 +462,23 @@ describe("Telegram message handler", () => {
       approval.id
     );
 
-    expect(shellRunner.executeApproval).toHaveBeenCalled();
-    expect(reply).toHaveBeenCalledWith(expect.stringContaining(`Approved command ${approval.id}.`));
+    expect(approvePending).toHaveBeenCalledWith("77", approval.id, expect.any(Object));
+    expect(reply).toHaveBeenCalledWith(`Approved command ${approval.id}.`);
   });
 
   it("denies a pending command", async () => {
     const approvalStore = new ApprovalStore();
     const approval = approvalStore.createShellApproval("77", "npm install", process.cwd());
+    const denyPending = vi.fn(() => approval);
     const handler = createDenyCommandHandler({
       allowedUserId: "123",
       allowedChatIds: [],
       approvalStore,
-      shellRunner: { executeApproval: vi.fn() } as never,
-      pathAccessPolicy: createPathAccessPolicy(process.cwd()),
-      queue: new ChatTaskQueue(),
+      taskRuntime: {
+        approvePending: vi.fn(),
+        denyPending,
+        requestCancel: vi.fn(() => false)
+      } as never,
       logger: createLogger("error")
     });
 
@@ -468,12 +517,13 @@ describe("Telegram message handler", () => {
   });
 
   it("requests cancellation immediately for an active task", async () => {
-    const queue = new ChatTaskQueue();
-    queue.beginActiveRun("77");
+    const requestCancel = vi.fn(() => true);
     const handler = createCancelCommandHandler({
       allowedUserId: "123",
       allowedChatIds: [],
-      queue,
+      taskRuntime: {
+        requestCancel
+      } as never,
       logger: createLogger("error")
     });
 
@@ -484,7 +534,7 @@ describe("Telegram message handler", () => {
       reply
     });
 
-    expect(queue.shouldCancel("77")).toBe(true);
+    expect(requestCancel).toHaveBeenCalledWith("77");
     expect(reply).toHaveBeenCalledWith(CANCEL_REQUESTED_MESSAGE);
   });
 
@@ -492,7 +542,9 @@ describe("Telegram message handler", () => {
     const handler = createCancelCommandHandler({
       allowedUserId: "123",
       allowedChatIds: [],
-      queue: new ChatTaskQueue(),
+      taskRuntime: {
+        requestCancel: vi.fn(() => false)
+      } as never,
       logger: createLogger("error")
     });
 

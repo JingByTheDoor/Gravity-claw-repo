@@ -29,6 +29,8 @@ import { createOcrReadTool } from "./ocr-read.js";
 import { createReadFileTool } from "./read-file.js";
 import { createRecallMemoryTool } from "./recall-memory.js";
 import { createRememberFactTool } from "./remember-fact.js";
+import { createRequestExternalReviewTool } from "./request-external-review.js";
+import { createResolveKnownFolderTool } from "./resolve-known-folder.js";
 import { createReplaceInFileTool } from "./replace-in-file.js";
 import { createRunShellCommandTool } from "./run-shell-command.js";
 import { createSearchFilesTool } from "./search-files.js";
@@ -39,6 +41,7 @@ import { createWaitForElementTool } from "./wait-for-element.js";
 import { createWriteFileTool } from "./write-file.js";
 import { ShellRunner } from "./shell-runner.js";
 import type { PathAccessPolicy } from "./workspace.js";
+import type { ApprovalPolicy } from "../runtime/contracts.js";
 
 function createToolError(message: string): string {
   return JSON.stringify({
@@ -87,6 +90,7 @@ interface CreateDefaultToolRegistryOptions {
   browserController: BrowserController;
   desktopController: DesktopController;
   visionClient: VisionClient;
+  approvalPolicy: ApprovalPolicy;
   logger: Logger;
 }
 
@@ -95,6 +99,7 @@ export function createDefaultToolRegistry(options: CreateDefaultToolRegistryOpti
     createGetCurrentTimeTool(),
     createRememberFactTool(options.memoryStore),
     createRecallMemoryTool(options.memoryStore),
+    createRequestExternalReviewTool(options.approvalStore, options.approvalPolicy),
     createLaunchAppTool(options.appLauncher),
     createBrowserNavigateTool(options.browserController),
     createBrowserSnapshotTool(options.browserController),
@@ -117,6 +122,7 @@ export function createDefaultToolRegistry(options: CreateDefaultToolRegistryOpti
     createClickElementTool(options.desktopController, options.visionClient),
     createClipboardReadTool(options.desktopController),
     createClipboardWriteTool(options.desktopController),
+    createResolveKnownFolderTool(options.pathAccessPolicy),
     createListFilesTool(options.pathAccessPolicy),
     createReadFileTool(options.pathAccessPolicy),
     createSearchFilesTool(options.pathAccessPolicy),

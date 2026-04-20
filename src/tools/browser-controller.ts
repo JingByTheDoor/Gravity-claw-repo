@@ -98,6 +98,8 @@ interface BrowserControllerOptions {
   logger: Logger;
   artifactsDir?: string;
   platform?: NodeJS.Platform;
+  userDataDirRoot?: string;
+  headless?: boolean;
 }
 
 interface BrowserSessionState {
@@ -171,12 +173,18 @@ function isPathInsideDirectory(targetPath: string, directoryPath: string): boole
 export class BrowserController {
   private readonly artifactsDir: string;
   private readonly platform: NodeJS.Platform;
+  private readonly userDataDirRoot: string | undefined;
+  private readonly headless: boolean;
   private readonly sessions = new Map<string, BrowserSessionState>();
 
   constructor(private readonly options: BrowserControllerOptions) {
     this.artifactsDir =
       options.artifactsDir ?? path.resolve(process.cwd(), "artifacts", "screenshots");
     this.platform = options.platform ?? process.platform;
+    this.userDataDirRoot = options.userDataDirRoot?.trim()
+      ? path.resolve(options.userDataDirRoot)
+      : undefined;
+    this.headless = options.headless ?? true;
   }
 
   async navigate(chatId: string, url: string, timeoutMs?: number): Promise<BrowserNavigateResult> {
@@ -511,8 +519,10 @@ export class BrowserController {
   }
 
   private async initializePage(chatId: string, session: BrowserSessionState): Promise<Page> {
-    const browser = await this.ensureBrowser(chatId, session);
-    const context = await this.ensureContext(session, browser);
+    const browser = this.userDataDirRoot
+      ? undefined
+      : await this.ensureBrowser(chatId, session);
+    const context = await this.ensureContext(chatId, session, browser);
     const page = await context.newPage();
     page.setDefaultTimeout(DEFAULT_TIMEOUT_MS);
     page.setDefaultNavigationTimeout(DEFAULT_TIMEOUT_MS);
@@ -525,7 +535,7 @@ export class BrowserController {
     }
 
     const launchOptions: LaunchOptions = {
-      headless: true
+      headless: this.headless
     };
 
     try {
@@ -539,7 +549,7 @@ export class BrowserController {
         error: error instanceof Error ? error.message : String(error)
       });
       session.browser = await chromium.launch({
-        headless: true,
+        headless: this.headless,
         channel: "msedge"
       });
     }
@@ -561,11 +571,27 @@ export class BrowserController {
   }
 
   private async ensureContext(
+    chatId: string,
     session: BrowserSessionState,
-    browser: Browser
+    browser?: Browser
   ): Promise<BrowserContext> {
     if (session.context) {
       return session.context;
+    }
+
+    if (this.userDataDirRoot) {
+      await fs.mkdir(this.userDataDirRoot, { recursive: true });
+      const persistentContext = await this.launchPersistentContext(
+        this.resolveUserDataDir(chatId),
+        this.platform === "win32" ? "msedge" : undefined
+      );
+      session.context = persistentContext;
+      session.browser = persistentContext.browser() ?? undefined;
+      return persistentContext;
+    }
+
+    if (!browser) {
+      throw new Error("Browser instance is required for non-persistent browser contexts.");
     }
 
     session.context = await browser.newContext({
@@ -576,6 +602,51 @@ export class BrowserController {
       ignoreHTTPSErrors: true
     });
     return session.context;
+  }
+
+  private async launchPersistentContext(
+    userDataDir: string,
+    channel: "msedge" | undefined
+  ): Promise<BrowserContext> {
+    try {
+      return await chromium.launchPersistentContext(userDataDir, {
+        headless: this.headless,
+        viewport: {
+          width: 1440,
+          height: 900
+        },
+        ignoreHTTPSErrors: true,
+        ...(channel ? { channel } : {})
+      });
+    } catch (error) {
+      if (!channel) {
+        throw error;
+      }
+
+      this.options.logger.warn("browser.launch.persistent_channel_failed", {
+        channel,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      return chromium.launchPersistentContext(userDataDir, {
+        headless: this.headless,
+        viewport: {
+          width: 1440,
+          height: 900
+        },
+        ignoreHTTPSErrors: true
+      });
+    }
+  }
+
+  private resolveUserDataDir(chatId: string): string {
+    return path.join(
+      this.userDataDirRoot ?? path.resolve(process.cwd(), "artifacts", "browser-profiles"),
+      this.sanitizeSessionId(chatId)
+    );
+  }
+
+  private sanitizeSessionId(value: string): string {
+    return value.replace(/[^a-zA-Z0-9._-]+/g, "_");
   }
 
   private async resolveScreenshotOutputPath(

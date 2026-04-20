@@ -2,6 +2,8 @@ import type { ApprovalStore } from "../approvals/store.js";
 import type { AppEnv } from "../config/env.js";
 import type { RuntimeErrorStore } from "../errors/runtime-error-store.js";
 import type { Logger } from "../logging/logger.js";
+import type { TaskStatus, WorkerSession } from "../runtime/contracts.js";
+import type { TaskStore } from "../runtime/task-store.js";
 import type { PathAccessPolicy } from "../tools/workspace.js";
 
 interface StatusServiceOptions {
@@ -9,6 +11,8 @@ interface StatusServiceOptions {
   pathAccessPolicy: PathAccessPolicy;
   approvalStore: ApprovalStore;
   errorStore: RuntimeErrorStore;
+  taskStore?: TaskStore;
+  workerSession?: Pick<WorkerSession, "label" | "mode" | "hostProfileRoot" | "browserProfileDir">;
   logger: Logger;
   fetchImpl?: typeof fetch;
   requestTimeoutMs?: number;
@@ -39,6 +43,11 @@ export interface StatusSnapshot {
   ollamaVisionModel: string;
   fastRoutingEnabled: boolean;
   pendingApprovalCount: number;
+  workerLabel: string;
+  workerMode: "local" | "vm";
+  workerHostProfileRoot?: string;
+  browserProfileDir?: string;
+  taskCounts: Record<TaskStatus, number>;
   latestLocalErrorAt?: string;
   latestLocalErrorScope?: string;
 }
@@ -75,6 +84,22 @@ export class StatusService {
       ollamaVisionModel: this.options.env.ollamaVisionModel,
       fastRoutingEnabled: this.options.env.ollamaFastModel !== this.options.env.ollamaModel,
       pendingApprovalCount: this.options.approvalStore.countPending(chatId),
+      workerLabel: this.options.workerSession?.label ?? this.options.env.workerLabel,
+      workerMode: this.options.workerSession?.mode ?? this.options.env.workerMode,
+      ...(this.options.workerSession?.hostProfileRoot
+        ? { workerHostProfileRoot: this.options.workerSession.hostProfileRoot }
+        : {}),
+      ...(this.options.workerSession?.browserProfileDir
+        ? { browserProfileDir: this.options.workerSession.browserProfileDir }
+        : {}),
+      taskCounts: this.options.taskStore?.countByStatus(chatId) ?? {
+        queued: 0,
+        running: 0,
+        waiting_approval: 0,
+        completed: 0,
+        failed: 0,
+        canceled: 0
+      },
       ...(latestLocalError
         ? {
             latestLocalErrorAt: latestLocalError.createdAt,

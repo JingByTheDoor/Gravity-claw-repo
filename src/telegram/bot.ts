@@ -1,12 +1,12 @@
 import { Bot } from "grammy";
-import type { AgentLoop } from "../agent/loop.js";
 import type { ChatTaskQueue } from "../agent/queue.js";
 import type { StatusService } from "../app/status-service.js";
 import type { ApprovalStore } from "../approvals/store.js";
 import type { RuntimeErrorStore } from "../errors/runtime-error-store.js";
 import type { Logger } from "../logging/logger.js";
 import type { MemoryStoreLike } from "../memory/store.js";
-import type { ShellRunner } from "../tools/shell-runner.js";
+import type { NotificationSink } from "../runtime/contracts.js";
+import type { TaskRuntime } from "../runtime/task-runtime.js";
 import type { PathAccessPolicy } from "../tools/workspace.js";
 import {
   createApprovalsCommandHandler,
@@ -24,15 +24,15 @@ interface CreateBotOptions {
   botToken: string;
   allowedUserId: string;
   allowedChatIds: string[];
-  agentLoop: AgentLoop;
+  taskRuntime: TaskRuntime;
   memoryStore: MemoryStoreLike;
   approvalStore: ApprovalStore;
   errorStore: RuntimeErrorStore;
-  shellRunner: ShellRunner;
   pathAccessPolicy: PathAccessPolicy;
   queue: ChatTaskQueue;
   logger: Logger;
   statusService: StatusService;
+  notificationSink?: NotificationSink;
 }
 
 export function createBot(options: CreateBotOptions): Bot {
@@ -48,10 +48,11 @@ export function createBot(options: CreateBotOptions): Bot {
     allowedUserId: options.allowedUserId,
     allowedChatIds: options.allowedChatIds,
     approvalStore: options.approvalStore,
-    shellRunner: options.shellRunner,
-    pathAccessPolicy: options.pathAccessPolicy,
-    queue: options.queue,
-    logger: options.logger
+    taskRuntime: options.taskRuntime,
+    logger: options.logger,
+    ...(options.notificationSink
+      ? { secondaryNotificationSink: options.notificationSink }
+      : {})
   });
   const helpCommandHandler = createHelpCommandHandler({
     allowedUserId: options.allowedUserId,
@@ -77,24 +78,28 @@ export function createBot(options: CreateBotOptions): Bot {
   const cancelCommandHandler = createCancelCommandHandler({
     allowedUserId: options.allowedUserId,
     allowedChatIds: options.allowedChatIds,
-    queue: options.queue,
+    taskRuntime: options.taskRuntime,
     logger: options.logger
   });
   const denyCommandHandler = createDenyCommandHandler({
     allowedUserId: options.allowedUserId,
     allowedChatIds: options.allowedChatIds,
     approvalStore: options.approvalStore,
-    shellRunner: options.shellRunner,
-    pathAccessPolicy: options.pathAccessPolicy,
-    queue: options.queue,
-    logger: options.logger
+    taskRuntime: options.taskRuntime,
+    logger: options.logger,
+    ...(options.notificationSink
+      ? { secondaryNotificationSink: options.notificationSink }
+      : {})
   });
   const messageHandler = createMessageHandler({
     allowedUserId: options.allowedUserId,
     allowedChatIds: options.allowedChatIds,
-    agentLoop: options.agentLoop,
+    taskRuntime: options.taskRuntime,
     queue: options.queue,
-    logger: options.logger
+    logger: options.logger,
+    ...(options.notificationSink
+      ? { secondaryNotificationSink: options.notificationSink }
+      : {})
   });
   const lastErrorCommandHandler = createLastErrorCommandHandler({
     allowedUserId: options.allowedUserId,

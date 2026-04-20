@@ -49,11 +49,19 @@ export function createRunShellCommandTool(
           });
         }
 
-        const approval = approvalStore.createShellApproval(context.chatId, command.trim(), cwd);
+        const approval = approvalStore.createShellApproval(
+          context.chatId,
+          command.trim(),
+          cwd,
+          context.taskId
+        );
         return JSON.stringify({
           ok: false,
           approvalRequired: true,
           approvalId: approval.id,
+          kind: approval.kind,
+          title: approval.title,
+          details: approval.details,
           message: `Command requires approval. Ask the user to send /approve ${approval.id} or /deny ${approval.id}.`,
           cwd: describeAccessiblePath(pathAccessPolicy, cwd)
         });

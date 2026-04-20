@@ -1,9 +1,10 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createListFilesTool } from "../src/tools/list-files.js";
 import { createReadFileTool } from "../src/tools/read-file.js";
+import { createResolveKnownFolderTool } from "../src/tools/resolve-known-folder.js";
 import { createReplaceInFileTool } from "../src/tools/replace-in-file.js";
 import { createSearchFilesTool } from "../src/tools/search-files.js";
 import { createWriteFileTool } from "../src/tools/write-file.js";
@@ -114,6 +115,58 @@ describe("workspace tools", () => {
 
     expect(result.ok).toBe(false);
     expect(result.error).toContain("outside the allowed local roots");
+  });
+
+  it("resolves a redirected Windows Downloads folder and reports when it is outside trusted roots", async () => {
+    const workspaceRoot = createTempWorkspace();
+    const redirectedDownloadsRoot = createTempWorkspace();
+    const tool = createResolveKnownFolderTool(createPathAccessPolicy(workspaceRoot), {
+      platform: "win32",
+      homedir: () => workspaceRoot,
+      readWindowsUserShellFolder: vi.fn(async () => redirectedDownloadsRoot),
+      pathExists: vi.fn(() => true)
+    });
+
+    const result = JSON.parse(
+      await tool.execute({ folder: "downloads folder" }, { chatId: "chat-1" })
+    ) as {
+      ok: boolean;
+      folder: string;
+      path: string;
+      accessible: boolean;
+      accessError?: string;
+    };
+
+    expect(result.ok).toBe(true);
+    expect(result.folder).toBe("downloads");
+    expect(result.path).toBe(path.resolve(redirectedDownloadsRoot));
+    expect(result.accessible).toBe(false);
+    expect(result.accessError).toContain("outside the allowed local roots");
+  });
+
+  it("falls back to the home-based Downloads path when no Windows redirect is found", async () => {
+    const workspaceRoot = createTempWorkspace();
+    const expectedDownloadsPath = path.join(workspaceRoot, "Downloads");
+    const tool = createResolveKnownFolderTool(createPathAccessPolicy(workspaceRoot), {
+      platform: "linux",
+      homedir: () => workspaceRoot,
+      pathExists: vi.fn(() => false),
+      readWindowsUserShellFolder: vi.fn(async () => undefined)
+    });
+
+    const result = JSON.parse(
+      await tool.execute({ folder: "downloads" }, { chatId: "chat-1" })
+    ) as {
+      ok: boolean;
+      path: string;
+      exists: boolean;
+      accessible: boolean;
+    };
+
+    expect(result.ok).toBe(true);
+    expect(result.path).toBe(path.resolve(expectedDownloadsPath));
+    expect(result.exists).toBe(false);
+    expect(result.accessible).toBe(true);
   });
 
   it("writes files inside trusted roots", async () => {

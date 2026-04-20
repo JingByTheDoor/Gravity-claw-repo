@@ -69,6 +69,10 @@ export class ShellRunner {
   }
 
   async executeApproval(approval: PendingApproval): Promise<ShellExecutionResult> {
+    if (!approval.command || !approval.cwd) {
+      throw new Error("Pending approval is missing shell command metadata.");
+    }
+
     return this.execute(approval.command, approval.cwd);
   }
 }

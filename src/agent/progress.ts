@@ -1,4 +1,5 @@
 export interface AgentRunOptions {
+  taskId?: string;
   onProgress?: (message: string) => Promise<void> | void;
   consumeSteeringMessages?: () => Promise<string[]> | string[];
   shouldCancel?: () => boolean | Promise<boolean>;
@@ -47,6 +48,14 @@ function readArrayLength(source: Record<string, unknown> | undefined, key: strin
   return Array.isArray(value) ? value.length : undefined;
 }
 
+function formatFailureStatus(
+  fallbackMessage: string,
+  rawError: string | undefined
+): string {
+  const error = rawError ? clipText(rawError, 80) : undefined;
+  return error ? `${fallbackMessage}: ${error}` : fallbackMessage;
+}
+
 function parseToolResult(rawResult: string): Record<string, unknown> | undefined {
   try {
     const parsed = JSON.parse(rawResult) as unknown;
@@ -84,6 +93,7 @@ export function formatToolStartProgressMessage(
   const path = readString(input, "path");
   const query = readString(input, "query");
   const keys = readString(input, "keys");
+  const folder = readString(input, "folder");
 
   switch (toolName) {
     case "launch_app":
@@ -154,8 +164,14 @@ export function formatToolStartProgressMessage(
       return "Status: reading the clipboard";
     case "clipboard_write":
       return "Status: updating the clipboard";
+    case "resolve_known_folder":
+      return folder
+        ? `Status: resolving ${quoteValue(folder, 40)}`
+        : "Status: resolving a common folder";
     case "run_shell_command":
       return "Status: running a local shell command";
+    case "request_external_review":
+      return "Status: preparing an action for your review";
     case "get_current_time":
       return "Status: checking the current time";
     case "remember_fact":
@@ -177,7 +193,9 @@ export function formatToolFinishedProgressMessage(
   const inputAppName = readString(input, "app_name");
   const inputPath = readString(input, "path");
   const inputQuery = readString(input, "query");
+  const inputFolder = readString(input, "folder");
   const matchedApp = readString(result, "matchedApp") ?? readString(result, "matchedName") ?? inputAppName;
+  const error = readString(result, "error") ?? readString(result, "accessError");
 
   switch (toolName) {
     case "launch_app":
@@ -264,6 +282,15 @@ export function formatToolFinishedProgressMessage(
     case "mouse_click":
       return ok ? "Status: clicked on screen" : "Status: could not click on screen";
     case "list_files": {
+      if (!ok) {
+        return formatFailureStatus(
+          inputPath
+            ? `Status: could not check ${quoteValue(inputPath, 70)}`
+            : "Status: could not check the files",
+          error
+        );
+      }
+
       const entryCount = readArrayLength(result, "entries");
       if (typeof entryCount === "number") {
         return `Status: found ${formatCount(entryCount, "file entry", "file entries")}`;
@@ -272,12 +299,30 @@ export function formatToolFinishedProgressMessage(
       return "Status: checked the files";
     }
     case "read_file": {
+      if (!ok) {
+        return formatFailureStatus(
+          inputPath
+            ? `Status: could not read ${quoteValue(inputPath, 70)}`
+            : "Status: could not read the file",
+          error
+        );
+      }
+
       const path = readString(result, "path") ?? inputPath;
       return path
         ? `Status: finished reading ${quoteValue(path, 70)}`
         : "Status: finished reading the file";
     }
     case "search_files": {
+      if (!ok) {
+        return formatFailureStatus(
+          inputQuery
+            ? `Status: could not search files for ${quoteValue(inputQuery, 60)}`
+            : "Status: could not search the files",
+          error
+        );
+      }
+
       const matchCount = readArrayLength(result, "matches");
       const query = readString(result, "query") ?? inputQuery;
       if (typeof matchCount === "number" && query) {
@@ -316,6 +361,25 @@ export function formatToolFinishedProgressMessage(
       return ok ? "Status: read the clipboard" : "Status: could not read the clipboard";
     case "clipboard_write":
       return ok ? "Status: updated the clipboard" : "Status: could not update the clipboard";
+    case "resolve_known_folder": {
+      const folder = readString(result, "folder") ?? inputFolder;
+      const resolvedPath = readString(result, "displayPath") ?? readString(result, "path");
+
+      if (!ok) {
+        return formatFailureStatus(
+          folder
+            ? `Status: could not resolve ${quoteValue(folder, 40)}`
+            : "Status: could not resolve the folder",
+          error
+        );
+      }
+
+      if (folder && resolvedPath) {
+        return `Status: resolved ${quoteValue(folder, 40)} to ${quoteValue(resolvedPath, 60)}`;
+      }
+
+      return "Status: resolved the folder";
+    }
     case "run_shell_command":
       if (readBoolean(result, "approvalRequired")) {
         return "Status: a shell command needs approval";
@@ -324,6 +388,14 @@ export function formatToolFinishedProgressMessage(
       return ok
         ? "Status: finished the local shell command"
         : "Status: the local shell command reported an issue";
+    case "request_external_review":
+      if (readBoolean(result, "approvalRequired")) {
+        return "Status: an external action is waiting for approval";
+      }
+
+      return ok
+        ? "Status: the external action was already approved"
+        : "Status: could not prepare the external action review";
     case "get_current_time":
       return ok ? "Status: checked the current time" : "Status: could not check the current time";
     case "remember_fact":

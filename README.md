@@ -35,6 +35,7 @@ Level 4 tools-ready foundation for a local-first Telegram AI agent.
   - `click_element`
   - `clipboard_read`
   - `clipboard_write`
+  - `resolve_known_folder`
   - `list_files`
   - `read_file`
   - `search_files`
@@ -148,5 +149,6 @@ npm run build
 - Use `/approve <id>` or `/deny <id>` for shell commands that require confirmation.
 - All shell commands require approval first. Path validation still blocks commands that target paths outside the trusted local roots.
 - By default, file tools stay in `WORKSPACE_ROOT`. Add `TOOL_ALLOWED_ROOTS` in `.env` to let the bot inspect extra trusted folders with absolute paths.
+- On Windows, common folders like Downloads or Documents can be redirected outside `C:\Users\<name>`. If that happens, add the redirected path itself to `TOOL_ALLOWED_ROOTS`.
 - Screenshots are saved under `artifacts/screenshots/` by default.
 - Browser tools keep a separate Playwright session per Telegram chat until `browser_close` resets that chat's browser state.
