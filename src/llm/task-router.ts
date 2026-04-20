@@ -5,6 +5,13 @@ import type { LLMClient } from "./client.js";
 
 const ROUTER_MESSAGE_LIMIT = 6;
 const ROUTER_TEXT_LIMIT = 280;
+const EXECUTION_HEAVY_PATTERN = /```|`[^`]+`|\b(stack trace|error log|traceback|exception)\b/i;
+const DIRECT_TASK_REQUEST_PATTERN =
+  /^(?:please\s+)?(?:open|launch|start|stop|close|focus|take|capture|send|show|check|look|search|find|inspect|review|compare|read|write|edit|update|change|make|build|create|generate|fix|debug|run|execute|install|uninstall|summarize|analy[sz]e|organize|prepare|draft|plan|remember|save|list)\b/i;
+const POLITE_TASK_REQUEST_PATTERN =
+  /\b(?:can|could|would|will)\s+you\s+(?:please\s+)?(?:open|launch|start|stop|close|focus|take|capture|send|show|check|look|search|find|inspect|review|compare|read|write|edit|update|change|make|build|create|generate|fix|debug|run|execute|install|uninstall|summarize|analy[sz]e|organize|prepare|draft|plan|remember|save|list)\b/i;
+const TASK_INTENT_PATTERN =
+  /\b(?:help me|i need you to|i want you to|try to|step by step|next,|then\b|after that|before that|while you)\b/i;
 
 type TaskRoute = "fast" | "primary";
 
@@ -115,7 +122,7 @@ function parseRoutingDecision(rawContent: string): RoutingDecision | undefined {
   return undefined;
 }
 
-function looksComplexTask(request: TaskRouteRequest): boolean {
+function shouldPreferPrimary(request: TaskRouteRequest): boolean {
   const normalizedInput = request.userInput.trim();
   if (normalizedInput.length >= 220) {
     return true;
@@ -125,8 +132,11 @@ function looksComplexTask(request: TaskRouteRequest): boolean {
     return true;
   }
 
-  return /```|`[^`]+`|\b(debug|fix|bug|error|stack trace|refactor|rewrite|implement|build|test|code|typescript|javascript|python|sql|regex|shell|terminal|command|script|file|folder|path|read|write|edit|patch|screenshot|ocr|click|wait|open|launch|focus|close|first|then|after|before|analy[sz]e|compare|investigate|why)\b/i.test(
-    normalizedInput
+  return (
+    EXECUTION_HEAVY_PATTERN.test(normalizedInput) ||
+    DIRECT_TASK_REQUEST_PATTERN.test(normalizedInput) ||
+    POLITE_TASK_REQUEST_PATTERN.test(normalizedInput) ||
+    TASK_INTENT_PATTERN.test(normalizedInput)
   );
 }
 
@@ -175,7 +185,7 @@ export class FastFirstTaskRouter implements TaskRouter {
         throw new Error("Router returned an invalid decision payload.");
       }
     } catch (error) {
-      const fallbackRoute: TaskRoute = looksComplexTask(request) ? "primary" : "fast";
+      const fallbackRoute: TaskRoute = shouldPreferPrimary(request) ? "primary" : "fast";
       decision = {
         route: fallbackRoute,
         ...(fallbackRoute === "primary" ? { rewritten_prompt: request.userInput } : {}),
@@ -188,6 +198,14 @@ export class FastFirstTaskRouter implements TaskRouter {
         fallbackRoute,
         error: error instanceof Error ? error.message : String(error)
       });
+    }
+
+    if (decision.route === "fast" && shouldPreferPrimary(request)) {
+      decision = {
+        route: "primary",
+        rewritten_prompt: request.userInput,
+        reason: "task_bias_override"
+      };
     }
 
     const preparedUserInput =
@@ -219,8 +237,9 @@ export class FastFirstTaskRouter implements TaskRouter {
         content: [
           "You are a strict routing model for a local AI agent.",
           'Return JSON only with this schema: {"route":"fast"|"primary","rewritten_prompt":"string","reason":"string"}.',
-          "Choose fast only for short, direct, low-risk tasks that a small local model can handle well.",
-          "Choose primary for coding, debugging, files, shell work, screenshots, OCR, multi-step actions, longer context, ambiguous requests, or anything that needs careful reasoning.",
+          "Choose fast only for casual conversation, social replies, and straightforward question answering where the agent mostly just answers in plain text.",
+          "If the user is asking the agent to do something, produce something, inspect something, change something, or carry out a task, prefer primary even when the request is short.",
+          "Choose primary for coding, debugging, files, shell work, screenshots, OCR, multi-step actions, drafting, summarizing, planning, longer context, ambiguous requests, or anything that needs careful reasoning.",
           "If you choose primary, rewrite the task into a cleaner prompt that preserves the user's intent and constraints.",
           "If you choose fast, set rewritten_prompt to an empty string."
         ].join("\n")

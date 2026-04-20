@@ -137,4 +137,85 @@ describe("FastFirstTaskRouter", () => {
     expect(result.llmClient).toBe(primaryClient);
     expect(result.reason).toBe("heuristic_fallback");
   });
+
+  it("overrides a fast routing decision when the message is an actual task", async () => {
+    const fastClient: LLMClient = {
+      checkHealth: vi.fn(async () => undefined),
+      runStep: vi.fn(async (): Promise<LLMRunResponse> => ({
+        message: {
+          role: "assistant",
+          content: '{"route":"fast","rewritten_prompt":"","reason":"short_request"}'
+        }
+      }))
+    };
+    const primaryClient: LLMClient = {
+      checkHealth: vi.fn(async () => undefined),
+      runStep: vi.fn(async (): Promise<LLMRunResponse> => {
+        throw new Error("Primary client should not be called during routing");
+      })
+    };
+
+    const router = new FastFirstTaskRouter({
+      fastClient,
+      primaryClient,
+      fastModel: "qwen2.5:1.5b",
+      primaryModel: "qwen2.5:7b",
+      logger: createLogger("error")
+    });
+
+    const result = await router.routeTask({
+      userInput: "could you draft a short email to my teacher about being absent tomorrow",
+      promptContext: {
+        coreFacts: [],
+        recentMessages: []
+      },
+      tools: dummyTools
+    });
+
+    expect(result.route).toBe("primary");
+    expect(result.llmClient).toBe(primaryClient);
+    expect(result.reason).toBe("task_bias_override");
+    expect(result.preparedUserInput).toBe(
+      "could you draft a short email to my teacher about being absent tomorrow"
+    );
+  });
+
+  it("keeps plain question answering on the fast model", async () => {
+    const fastClient: LLMClient = {
+      checkHealth: vi.fn(async () => undefined),
+      runStep: vi.fn(async (): Promise<LLMRunResponse> => ({
+        message: {
+          role: "assistant",
+          content: '{"route":"fast","rewritten_prompt":"","reason":"plain_qa"}'
+        }
+      }))
+    };
+    const primaryClient: LLMClient = {
+      checkHealth: vi.fn(async () => undefined),
+      runStep: vi.fn(async (): Promise<LLMRunResponse> => {
+        throw new Error("Primary client should not be selected");
+      })
+    };
+
+    const router = new FastFirstTaskRouter({
+      fastClient,
+      primaryClient,
+      fastModel: "qwen2.5:1.5b",
+      primaryModel: "qwen2.5:7b",
+      logger: createLogger("error")
+    });
+
+    const result = await router.routeTask({
+      userInput: "why is the sky blue",
+      promptContext: {
+        coreFacts: [],
+        recentMessages: []
+      },
+      tools: dummyTools
+    });
+
+    expect(result.route).toBe("fast");
+    expect(result.llmClient).toBe(fastClient);
+    expect(result.reason).toBe("plain_qa");
+  });
 });
