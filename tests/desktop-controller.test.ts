@@ -2,6 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import { createLogger } from "../src/logging/logger.js";
 import { AppLauncher } from "../src/tools/app-launcher.js";
 import { DesktopController } from "../src/tools/desktop-controller.js";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 describe("DesktopController", () => {
   it("lists running and installed apps with query filtering", async () => {
@@ -88,5 +91,66 @@ describe("DesktopController", () => {
 
     expect(result.ok).toBe(false);
     expect(result.error).toContain('No running app matched "photoshop"');
+  });
+
+  it("keeps screenshot output paths inside the artifacts directory", async () => {
+    const artifactsDir = fs.mkdtempSync(path.join(os.tmpdir(), "gravity-claw-shots-"));
+    const runPowerShell = vi.fn(async (command: string) => {
+      const payloadMatch = command.match(/FromBase64String\('([^']+)'\)/);
+      const payload = JSON.parse(
+        Buffer.from(payloadMatch?.[1] ?? "", "base64").toString("utf8")
+      ) as { outputPath: string };
+
+      return JSON.stringify({
+        ok: true,
+        mode: "full",
+        path: payload.outputPath,
+        width: 100,
+        height: 100,
+        x: 0,
+        y: 0
+      });
+    });
+
+    try {
+      const controller = new DesktopController({
+        logger: createLogger("error"),
+        appLauncher: { listInstalledApps: vi.fn(async () => []) } as unknown as AppLauncher,
+        artifactsDir,
+        platform: "win32",
+        runPowerShell
+      });
+
+      const result = await controller.takeScreenshot({
+        outputPath: "named-shot.png"
+      });
+
+      expect(result.path).toBe(path.join(artifactsDir, "named-shot.png"));
+    } finally {
+      fs.rmSync(artifactsDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects desktop screenshot output paths outside the artifacts directory", async () => {
+    const artifactsDir = fs.mkdtempSync(path.join(os.tmpdir(), "gravity-claw-shots-"));
+    const outsidePath = path.join(os.tmpdir(), "outside-shot.png");
+
+    try {
+      const controller = new DesktopController({
+        logger: createLogger("error"),
+        appLauncher: { listInstalledApps: vi.fn(async () => []) } as unknown as AppLauncher,
+        artifactsDir,
+        platform: "win32",
+        runPowerShell: vi.fn(async () => '{"ok":true}')
+      });
+
+      await expect(
+        controller.takeScreenshot({
+          outputPath: outsidePath
+        })
+      ).rejects.toThrow("screenshots artifacts directory");
+    } finally {
+      fs.rmSync(artifactsDir, { recursive: true, force: true });
+    }
   });
 });

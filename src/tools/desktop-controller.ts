@@ -206,6 +206,16 @@ function parseButton(value: unknown): "left" | "right" | "middle" {
   return "left";
 }
 
+function isPathInsideDirectory(targetPath: string, directoryPath: string): boolean {
+  const resolvedTarget = path.resolve(targetPath);
+  const resolvedDirectory = path.resolve(directoryPath);
+
+  return (
+    resolvedTarget === resolvedDirectory ||
+    resolvedTarget.startsWith(`${resolvedDirectory}${path.sep}`)
+  );
+}
+
 function createPayloadLiteral(value: unknown): string {
   return Buffer.from(JSON.stringify(value), "utf8").toString("base64");
 }
@@ -899,9 +909,20 @@ $process = Get-Process -Id ([int]$processId) -ErrorAction Stop
     outputPath: string | undefined,
     prefix: string
   ): Promise<string> {
-    const resolvedPath = outputPath
-      ? path.resolve(outputPath)
-      : path.join(this.artifactsDir, `${prefix}-${Date.now()}.png`);
+    const trimmedOutputPath = outputPath?.trim();
+    const resolvedPath =
+      !trimmedOutputPath
+        ? path.join(this.artifactsDir, `${prefix}-${Date.now()}.png`)
+        : path.isAbsolute(trimmedOutputPath)
+          ? path.resolve(trimmedOutputPath)
+          : /[\\/]/.test(trimmedOutputPath)
+            ? path.resolve(trimmedOutputPath)
+            : path.join(this.artifactsDir, trimmedOutputPath);
+
+    if (!isPathInsideDirectory(resolvedPath, this.artifactsDir)) {
+      throw new Error("Screenshot output path must stay inside the screenshots artifacts directory.");
+    }
+
     await fs.mkdir(path.dirname(resolvedPath), { recursive: true });
     return resolvedPath;
   }

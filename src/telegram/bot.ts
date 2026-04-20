@@ -23,6 +23,7 @@ import {
 interface CreateBotOptions {
   botToken: string;
   allowedUserId: string;
+  allowedChatIds: string[];
   agentLoop: AgentLoop;
   memoryStore: MemoryStoreLike;
   approvalStore: ApprovalStore;
@@ -38,12 +39,14 @@ export function createBot(options: CreateBotOptions): Bot {
   const bot = new Bot(options.botToken);
   const newCommandHandler = createNewCommandHandler({
     allowedUserId: options.allowedUserId,
+    allowedChatIds: options.allowedChatIds,
     memoryStore: options.memoryStore,
     queue: options.queue,
     logger: options.logger
   });
   const approveCommandHandler = createApproveCommandHandler({
     allowedUserId: options.allowedUserId,
+    allowedChatIds: options.allowedChatIds,
     approvalStore: options.approvalStore,
     shellRunner: options.shellRunner,
     pathAccessPolicy: options.pathAccessPolicy,
@@ -52,17 +55,20 @@ export function createBot(options: CreateBotOptions): Bot {
   });
   const helpCommandHandler = createHelpCommandHandler({
     allowedUserId: options.allowedUserId,
+    allowedChatIds: options.allowedChatIds,
     queue: options.queue,
     logger: options.logger
   });
   const statusCommandHandler = createStatusCommandHandler({
     allowedUserId: options.allowedUserId,
+    allowedChatIds: options.allowedChatIds,
     statusService: options.statusService,
     queue: options.queue,
     logger: options.logger
   });
   const approvalsCommandHandler = createApprovalsCommandHandler({
     allowedUserId: options.allowedUserId,
+    allowedChatIds: options.allowedChatIds,
     approvalStore: options.approvalStore,
     pathAccessPolicy: options.pathAccessPolicy,
     queue: options.queue,
@@ -70,11 +76,13 @@ export function createBot(options: CreateBotOptions): Bot {
   });
   const cancelCommandHandler = createCancelCommandHandler({
     allowedUserId: options.allowedUserId,
+    allowedChatIds: options.allowedChatIds,
     queue: options.queue,
     logger: options.logger
   });
   const denyCommandHandler = createDenyCommandHandler({
     allowedUserId: options.allowedUserId,
+    allowedChatIds: options.allowedChatIds,
     approvalStore: options.approvalStore,
     shellRunner: options.shellRunner,
     pathAccessPolicy: options.pathAccessPolicy,
@@ -83,12 +91,14 @@ export function createBot(options: CreateBotOptions): Bot {
   });
   const messageHandler = createMessageHandler({
     allowedUserId: options.allowedUserId,
+    allowedChatIds: options.allowedChatIds,
     agentLoop: options.agentLoop,
     queue: options.queue,
     logger: options.logger
   });
   const lastErrorCommandHandler = createLastErrorCommandHandler({
     allowedUserId: options.allowedUserId,
+    allowedChatIds: options.allowedChatIds,
     errorStore: options.errorStore,
     queue: options.queue,
     logger: options.logger

@@ -1,10 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { createBrowserClickTool } from "../src/tools/browser-click.js";
 import { createBrowserCloseTool } from "../src/tools/browser-close.js";
+import { BrowserController } from "../src/tools/browser-controller.js";
 import { createBrowserNavigateTool } from "../src/tools/browser-navigate.js";
 import { createBrowserScreenshotTool } from "../src/tools/browser-screenshot.js";
 import { createBrowserSnapshotTool } from "../src/tools/browser-snapshot.js";
 import { createBrowserTypeTool } from "../src/tools/browser-type.js";
+import { createLogger } from "../src/logging/logger.js";
 
 describe("browser tools", () => {
   it("normalizes navigation input and delegates to the browser controller", async () => {
@@ -23,9 +28,25 @@ describe("browser tools", () => {
       url: string;
     };
 
-    expect(navigate).toHaveBeenCalledWith("example.com", 5000);
+    expect(navigate).toHaveBeenCalledWith("chat-1", "example.com", 5000);
     expect(result.ok).toBe(true);
     expect(result.url).toBe("https://example.com");
+  });
+
+  it("blocks file URLs before delegating to the browser controller", async () => {
+    const navigate = vi.fn();
+    const tool = createBrowserNavigateTool({ navigate } as never);
+
+    const result = JSON.parse(
+      await tool.execute({ url: "file:///C:/Windows/win.ini" }, { chatId: "chat-1" })
+    ) as {
+      ok: boolean;
+      error: string;
+    };
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("file: URLs are blocked");
+    expect(navigate).not.toHaveBeenCalled();
   });
 
   it("returns a safe error when browser_click has no target", async () => {
@@ -63,7 +84,7 @@ describe("browser tools", () => {
       target: string;
     };
 
-    expect(click).toHaveBeenCalledWith({ text: "Sign in", exact: true }, 2500);
+    expect(click).toHaveBeenCalledWith("chat-1", { text: "Sign in", exact: true }, 2500);
     expect(result.ok).toBe(true);
     expect(result.target).toBe("text:Sign in");
   });
@@ -111,6 +132,7 @@ describe("browser tools", () => {
     };
 
     expect(type).toHaveBeenCalledWith(
+      "chat-1",
       {
         label: "Search",
         text: "hello",
@@ -148,7 +170,7 @@ describe("browser tools", () => {
       title: string;
     };
 
-    expect(snapshot).toHaveBeenCalledWith({
+    expect(snapshot).toHaveBeenCalledWith("chat-1", {
       maxTextLength: 1200,
       maxElements: 10
     });
@@ -180,7 +202,7 @@ describe("browser tools", () => {
       fullPage: boolean;
     };
 
-    expect(screenshot).toHaveBeenCalledWith({
+    expect(screenshot).toHaveBeenCalledWith("chat-1", {
       outputPath: "artifacts/screenshots/browser.png",
       fullPage: false
     });
@@ -201,10 +223,65 @@ describe("browser tools", () => {
       closed: boolean;
     };
 
-    expect(close).toHaveBeenCalled();
+    expect(close).toHaveBeenCalledWith("chat-1");
     expect(result).toEqual({
       ok: true,
       closed: true
     });
+  });
+
+  it("keeps browser screenshot output paths inside the artifacts directory", async () => {
+    const artifactsDir = fs.mkdtempSync(path.join(os.tmpdir(), "gravity-claw-browser-shots-"));
+    const fakePage = {
+      screenshot: vi.fn(async () => undefined),
+      url: vi.fn(() => "https://example.com"),
+      title: vi.fn(async () => "Example")
+    };
+    const controller = new BrowserController({
+      logger: createLogger("error"),
+      artifactsDir
+    });
+    Object.assign(controller as object, {
+      ensurePage: vi.fn(async () => fakePage)
+    });
+
+    try {
+      const result = await controller.screenshot("chat-1", {
+        outputPath: "named-browser.png"
+      });
+
+      expect(result.path).toBe(path.join(artifactsDir, "named-browser.png"));
+      expect(fakePage.screenshot).toHaveBeenCalledWith({
+        path: path.join(artifactsDir, "named-browser.png"),
+        fullPage: true
+      });
+    } finally {
+      fs.rmSync(artifactsDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects browser screenshot output paths outside the artifacts directory", async () => {
+    const artifactsDir = fs.mkdtempSync(path.join(os.tmpdir(), "gravity-claw-browser-shots-"));
+    const controller = new BrowserController({
+      logger: createLogger("error"),
+      artifactsDir
+    });
+    Object.assign(controller as object, {
+      ensurePage: vi.fn(async () => ({
+        screenshot: vi.fn(async () => undefined),
+        url: vi.fn(() => "https://example.com"),
+        title: vi.fn(async () => "Example")
+      }))
+    });
+
+    try {
+      await expect(
+        controller.screenshot("chat-1", {
+          outputPath: path.join(os.tmpdir(), "browser-outside.png")
+        })
+      ).rejects.toThrow("screenshots artifacts directory");
+    } finally {
+      fs.rmSync(artifactsDir, { recursive: true, force: true });
+    }
   });
 });

@@ -29,7 +29,7 @@ export function createBrowserClickTool(browserController: BrowserController): To
       },
       additionalProperties: false
     },
-    async execute(input) {
+    async execute(input, context) {
       const selector = typeof input.selector === "string" ? input.selector.trim() : "";
       const text = typeof input.text === "string" ? input.text.trim() : "";
       if (selector.length === 0 && text.length === 0) {
@@ -42,6 +42,7 @@ export function createBrowserClickTool(browserController: BrowserController): To
       const timeoutMs = parseDesktopInteger(input.timeout_ms);
       return JSON.stringify(
         await browserController.click(
+          context.chatId,
           {
             ...(selector ? { selector } : {}),
             ...(text ? { text } : {}),

@@ -8,9 +8,10 @@ import type { StatusService, StatusSnapshot } from "../app/status-service.js";
 import type { RuntimeErrorStore } from "../errors/runtime-error-store.js";
 import type { Logger } from "../logging/logger.js";
 import type { MemoryStoreLike } from "../memory/store.js";
+import { validateShellCommandTargets } from "../tools/shell-command-policy.js";
 import type { ShellRunner } from "../tools/shell-runner.js";
 import { describeAccessiblePath, type PathAccessPolicy } from "../tools/workspace.js";
-import { isAuthorizedUser } from "./auth.js";
+import { isAuthorizedContext } from "./auth.js";
 
 export const TEXT_ONLY_MESSAGE = "Level 1 supports text messages only.";
 export const NEW_CHAT_MESSAGE =
@@ -78,7 +79,7 @@ function parseCommandArgument(text: string): string | undefined {
 
 interface MessageContext {
   from?: { id: number };
-  chat?: { id: number | string | bigint };
+  chat?: { id: number | string | bigint; type?: string };
   message?: {
     message_id?: number;
     text?: string;
@@ -96,7 +97,7 @@ interface MessageContext {
 
 interface CommandContext {
   from?: { id: number } | undefined;
-  chat?: { id: number | string | bigint } | undefined;
+  chat?: { id: number | string | bigint; type?: string } | undefined;
   reply(text: string): Promise<unknown>;
 }
 
@@ -146,6 +147,7 @@ function formatStatusReply(snapshot: StatusSnapshot): string {
 
 interface MessageHandlerDependencies {
   allowedUserId: string;
+  allowedChatIds: string[];
   agentLoop: {
     run(chatId: string, userInput: string, options?: AgentRunOptions): Promise<AgentRunResult>;
   };
@@ -184,11 +186,17 @@ async function sendImageAttachments(
 
 export function createMessageHandler(dependencies: MessageHandlerDependencies) {
   return async (context: MessageContext): Promise<void> => {
-    if (!context.from || !isAuthorizedUser(context.from.id, dependencies.allowedUserId)) {
-      return;
-    }
-
-    if (!context.chat || !context.message) {
+    if (
+      !context.from ||
+      !context.chat ||
+      !isAuthorizedContext(
+        context.from.id,
+        dependencies.allowedUserId,
+        context.chat,
+        dependencies.allowedChatIds
+      ) ||
+      !context.message
+    ) {
       return;
     }
 
@@ -284,6 +292,7 @@ export function createMessageHandler(dependencies: MessageHandlerDependencies) {
 
 interface NewCommandDependencies {
   allowedUserId: string;
+  allowedChatIds: string[];
   memoryStore: MemoryStoreLike;
   queue: ChatTaskQueue;
   logger: Logger;
@@ -291,11 +300,16 @@ interface NewCommandDependencies {
 
 export function createNewCommandHandler(dependencies: NewCommandDependencies) {
   return async (context: CommandContext): Promise<void> => {
-    if (!context.from || !isAuthorizedUser(context.from.id, dependencies.allowedUserId)) {
-      return;
-    }
-
-    if (!context.chat) {
+    if (
+      !context.from ||
+      !context.chat ||
+      !isAuthorizedContext(
+        context.from.id,
+        dependencies.allowedUserId,
+        context.chat,
+        dependencies.allowedChatIds
+      )
+    ) {
       return;
     }
 
@@ -313,6 +327,7 @@ export function createNewCommandHandler(dependencies: NewCommandDependencies) {
 
 interface ApprovalCommandDependencies {
   allowedUserId: string;
+  allowedChatIds: string[];
   approvalStore: ApprovalStore;
   shellRunner: ShellRunner;
   pathAccessPolicy: PathAccessPolicy;
@@ -322,6 +337,7 @@ interface ApprovalCommandDependencies {
 
 interface LastErrorCommandDependencies {
   allowedUserId: string;
+  allowedChatIds: string[];
   errorStore: RuntimeErrorStore;
   queue: ChatTaskQueue;
   logger: Logger;
@@ -329,6 +345,7 @@ interface LastErrorCommandDependencies {
 
 interface ApprovalsCommandDependencies {
   allowedUserId: string;
+  allowedChatIds: string[];
   approvalStore: ApprovalStore;
   pathAccessPolicy: PathAccessPolicy;
   queue: ChatTaskQueue;
@@ -337,6 +354,7 @@ interface ApprovalsCommandDependencies {
 
 interface StatusCommandDependencies {
   allowedUserId: string;
+  allowedChatIds: string[];
   statusService: StatusService;
   queue: ChatTaskQueue;
   logger: Logger;
@@ -344,21 +362,28 @@ interface StatusCommandDependencies {
 
 interface CancelCommandDependencies {
   allowedUserId: string;
+  allowedChatIds: string[];
   queue: ChatTaskQueue;
   logger: Logger;
 }
 
 export function createHelpCommandHandler(dependencies: {
   allowedUserId: string;
+  allowedChatIds: string[];
   queue: ChatTaskQueue;
   logger: Logger;
 }) {
   return async (context: CommandContext): Promise<void> => {
-    if (!context.from || !isAuthorizedUser(context.from.id, dependencies.allowedUserId)) {
-      return;
-    }
-
-    if (!context.chat) {
+    if (
+      !context.from ||
+      !context.chat ||
+      !isAuthorizedContext(
+        context.from.id,
+        dependencies.allowedUserId,
+        context.chat,
+        dependencies.allowedChatIds
+      )
+    ) {
       return;
     }
 
@@ -375,11 +400,16 @@ export function createHelpCommandHandler(dependencies: {
 
 export function createApproveCommandHandler(dependencies: ApprovalCommandDependencies) {
   return async (context: CommandContext, rawArgument?: string): Promise<void> => {
-    if (!context.from || !isAuthorizedUser(context.from.id, dependencies.allowedUserId)) {
-      return;
-    }
-
-    if (!context.chat) {
+    if (
+      !context.from ||
+      !context.chat ||
+      !isAuthorizedContext(
+        context.from.id,
+        dependencies.allowedUserId,
+        context.chat,
+        dependencies.allowedChatIds
+      )
+    ) {
       return;
     }
 
@@ -397,6 +427,15 @@ export function createApproveCommandHandler(dependencies: ApprovalCommandDepende
         chatId,
         approvalId: approval.id
       });
+      const validation = validateShellCommandTargets(
+        approval.command,
+        approval.cwd,
+        dependencies.pathAccessPolicy
+      );
+      if (!validation.ok) {
+        await context.reply(`Blocked command ${approval.id}: ${validation.error}`);
+        return;
+      }
 
       const result = await dependencies.shellRunner.executeApproval(approval);
       const cwd = describeAccessiblePath(dependencies.pathAccessPolicy, approval.cwd);
@@ -421,11 +460,16 @@ export function createApproveCommandHandler(dependencies: ApprovalCommandDepende
 
 export function createDenyCommandHandler(dependencies: ApprovalCommandDependencies) {
   return async (context: CommandContext, rawArgument?: string): Promise<void> => {
-    if (!context.from || !isAuthorizedUser(context.from.id, dependencies.allowedUserId)) {
-      return;
-    }
-
-    if (!context.chat) {
+    if (
+      !context.from ||
+      !context.chat ||
+      !isAuthorizedContext(
+        context.from.id,
+        dependencies.allowedUserId,
+        context.chat,
+        dependencies.allowedChatIds
+      )
+    ) {
       return;
     }
 
@@ -451,11 +495,16 @@ export function createDenyCommandHandler(dependencies: ApprovalCommandDependenci
 
 export function createApprovalsCommandHandler(dependencies: ApprovalsCommandDependencies) {
   return async (context: CommandContext): Promise<void> => {
-    if (!context.from || !isAuthorizedUser(context.from.id, dependencies.allowedUserId)) {
-      return;
-    }
-
-    if (!context.chat) {
+    if (
+      !context.from ||
+      !context.chat ||
+      !isAuthorizedContext(
+        context.from.id,
+        dependencies.allowedUserId,
+        context.chat,
+        dependencies.allowedChatIds
+      )
+    ) {
       return;
     }
 
@@ -484,11 +533,16 @@ export function createApprovalsCommandHandler(dependencies: ApprovalsCommandDepe
 
 export function createLastErrorCommandHandler(dependencies: LastErrorCommandDependencies) {
   return async (context: CommandContext): Promise<void> => {
-    if (!context.from || !isAuthorizedUser(context.from.id, dependencies.allowedUserId)) {
-      return;
-    }
-
-    if (!context.chat) {
+    if (
+      !context.from ||
+      !context.chat ||
+      !isAuthorizedContext(
+        context.from.id,
+        dependencies.allowedUserId,
+        context.chat,
+        dependencies.allowedChatIds
+      )
+    ) {
       return;
     }
 
@@ -514,11 +568,16 @@ export function createLastErrorCommandHandler(dependencies: LastErrorCommandDepe
 
 export function createStatusCommandHandler(dependencies: StatusCommandDependencies) {
   return async (context: CommandContext): Promise<void> => {
-    if (!context.from || !isAuthorizedUser(context.from.id, dependencies.allowedUserId)) {
-      return;
-    }
-
-    if (!context.chat) {
+    if (
+      !context.from ||
+      !context.chat ||
+      !isAuthorizedContext(
+        context.from.id,
+        dependencies.allowedUserId,
+        context.chat,
+        dependencies.allowedChatIds
+      )
+    ) {
       return;
     }
 
@@ -537,11 +596,16 @@ export function createStatusCommandHandler(dependencies: StatusCommandDependenci
 
 export function createCancelCommandHandler(dependencies: CancelCommandDependencies) {
   return async (context: CommandContext): Promise<void> => {
-    if (!context.from || !isAuthorizedUser(context.from.id, dependencies.allowedUserId)) {
-      return;
-    }
-
-    if (!context.chat) {
+    if (
+      !context.from ||
+      !context.chat ||
+      !isAuthorizedContext(
+        context.from.id,
+        dependencies.allowedUserId,
+        context.chat,
+        dependencies.allowedChatIds
+      )
+    ) {
       return;
     }
 

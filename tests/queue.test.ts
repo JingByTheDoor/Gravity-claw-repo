@@ -22,6 +22,26 @@ describe("ChatTaskQueue", () => {
     expect(events).toEqual(["first-start", "first-end", "second-start", "second-end"]);
   });
 
+  it("serializes work across chats to avoid shared interactive controller state", async () => {
+    const queue = new ChatTaskQueue();
+    const events: string[] = [];
+
+    const first = queue.run("chat-1", async () => {
+      events.push("chat-1-start");
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      events.push("chat-1-end");
+    });
+
+    const second = queue.run("chat-2", async () => {
+      events.push("chat-2-start");
+      events.push("chat-2-end");
+    });
+
+    await Promise.all([first, second]);
+
+    expect(events).toEqual(["chat-1-start", "chat-1-end", "chat-2-start", "chat-2-end"]);
+  });
+
   it("tracks active runs and captures steering messages", () => {
     const queue = new ChatTaskQueue();
 

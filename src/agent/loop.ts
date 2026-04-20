@@ -622,6 +622,16 @@ export class AgentLoop {
 
   private async persistTurn(chatId: string, userInput: string, assistantReply: string): Promise<void> {
     this.options.memoryStore.saveConversationTurn(chatId, userInput, assistantReply);
-    await this.options.memoryStore.compactConversation(chatId, this.options.llmClient);
+
+    try {
+      await this.options.memoryStore.compactConversation(chatId, this.options.llmClient);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.options.logger.warn("memory.compaction.failed", {
+        chatId,
+        error: errorMessage
+      });
+      this.options.errorStore.record(chatId, "memory.compaction", errorMessage);
+    }
   }
 }

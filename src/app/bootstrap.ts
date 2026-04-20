@@ -117,6 +117,7 @@ export async function buildApp(env: AppEnv = loadEnv()): Promise<AppServices> {
   const bot = createBot({
     botToken: env.telegramBotToken,
     allowedUserId: env.telegramAllowedUserId,
+    allowedChatIds: env.telegramAllowedChatIds,
     agentLoop,
     memoryStore,
     approvalStore,
@@ -147,7 +148,6 @@ export async function buildApp(env: AppEnv = loadEnv()): Promise<AppServices> {
 
 export async function startApp(app: AppServices): Promise<void> {
   await app.bot.start({
-    drop_pending_updates: true,
     onStart(botInfo) {
       app.statusService.setBotInfo({
         id: botInfo.id,

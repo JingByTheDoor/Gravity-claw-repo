@@ -6,9 +6,11 @@ describe("environment parsing", () => {
     const env = parseEnv({
       TELEGRAM_BOT_TOKEN: "token",
       TELEGRAM_ALLOWED_USER_ID: "123",
+      TELEGRAM_ALLOWED_CHAT_IDS: "-1001;-1002",
       TOOL_ALLOWED_ROOTS: "C:\\Users\\User\\Desktop;C:\\Users\\User\\Documents"
     });
 
+    expect(env.telegramAllowedChatIds).toEqual(["-1001", "-1002"]);
     expect(env.toolAllowedRoots).toEqual([
       "C:\\Users\\User\\Desktop",
       "C:\\Users\\User\\Documents"
@@ -21,6 +23,7 @@ describe("environment parsing", () => {
       TELEGRAM_ALLOWED_USER_ID: "123"
     });
 
+    expect(env.telegramAllowedChatIds).toEqual([]);
     expect(env.toolAllowedRoots).toEqual([]);
     expect(env.ollamaFastModel).toBe(env.ollamaModel);
     expect(env.ollamaVisionModel).toBe(env.ollamaModel);

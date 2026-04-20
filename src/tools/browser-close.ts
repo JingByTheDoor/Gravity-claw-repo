@@ -10,8 +10,8 @@ export function createBrowserCloseTool(browserController: BrowserController): To
       properties: {},
       additionalProperties: false
     },
-    async execute() {
-      return JSON.stringify(await browserController.close());
+    async execute(_input, context) {
+      return JSON.stringify(await browserController.close(context.chatId));
     }
   };
 }

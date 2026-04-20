@@ -571,6 +571,43 @@ describe("AgentLoop", () => {
     expect(errorStore.getLast("chat-1")?.message).toBe("Vision pipeline crashed");
   });
 
+  it("keeps a successful reply when memory compaction fails afterward", async () => {
+    const memoryStore = createMemoryStoreStub();
+    vi.mocked(memoryStore.compactConversation).mockRejectedValueOnce(
+      new Error("Compaction model unavailable")
+    );
+    const errorStore = new RuntimeErrorStore();
+    const llmClient: LLMClient = {
+      checkHealth: vi.fn(async () => undefined),
+      runStep: vi.fn(async (): Promise<LLMRunResponse> => ({
+        message: {
+          role: "assistant",
+          content: "Successful reply."
+        }
+      }))
+    };
+
+    const loop = new AgentLoop({
+      llmClient,
+      toolRegistry: new ToolRegistry([createGetCurrentTimeTool()]),
+      memoryStore,
+      maxIterations: 4,
+      logger: createLogger("error"),
+      errorStore
+    });
+
+    await expect(loop.run("chat-1", "say something")).resolves.toEqual({
+      replyText: "Successful reply.",
+      attachments: []
+    });
+    expect(errorStore.getLast("chat-1")?.scope).toBe("memory.compaction");
+    expect(memoryStore.saveConversationTurn).toHaveBeenCalledWith(
+      "chat-1",
+      "say something",
+      "Successful reply."
+    );
+  });
+
   it("uses a routed prompt and stronger model when the router escalates", async () => {
     const defaultClient: LLMClient = {
       checkHealth: vi.fn(async () => undefined),

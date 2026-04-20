@@ -7,6 +7,7 @@ const envSchema = z.object({
     .string()
     .trim()
     .regex(/^\d+$/, "TELEGRAM_ALLOWED_USER_ID must be a numeric Telegram user ID."),
+  TELEGRAM_ALLOWED_CHAT_IDS: z.string().trim().min(1).optional(),
   OLLAMA_HOST: z.string().trim().url().default("http://127.0.0.1:11434"),
   OLLAMA_MODEL: z.string().trim().min(1).default("qwen2.5:3b"),
   OLLAMA_FAST_MODEL: z.string().trim().min(1).optional(),
@@ -22,6 +23,7 @@ const envSchema = z.object({
 export interface AppEnv {
   telegramBotToken: string;
   telegramAllowedUserId: string;
+  telegramAllowedChatIds: string[];
   ollamaHost: string;
   ollamaModel: string;
   ollamaFastModel: string;
@@ -45,6 +47,19 @@ function parseAllowedRoots(rawValue?: string): string[] {
     .filter((value) => value.length > 0);
 }
 
+function parseAllowedChatIds(rawValue?: string): string[] {
+  if (!rawValue) {
+    return [];
+  }
+
+  return [...new Set(
+    rawValue
+      .split(/[\r\n;,]+/)
+      .map((value) => value.trim())
+      .filter((value) => /^-?\d+$/.test(value))
+  )];
+}
+
 export function parseEnv(source: Record<string, string | undefined>): AppEnv {
   const result = envSchema.safeParse(source);
   if (!result.success) {
@@ -59,6 +74,7 @@ export function parseEnv(source: Record<string, string | undefined>): AppEnv {
   return {
     telegramBotToken: result.data.TELEGRAM_BOT_TOKEN,
     telegramAllowedUserId: result.data.TELEGRAM_ALLOWED_USER_ID,
+    telegramAllowedChatIds: parseAllowedChatIds(result.data.TELEGRAM_ALLOWED_CHAT_IDS),
     ollamaHost: result.data.OLLAMA_HOST,
     ollamaModel,
     ollamaFastModel,

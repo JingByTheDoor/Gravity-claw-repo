@@ -1,19 +1,20 @@
 import type { ToolDefinition } from "../agent/types.js";
 import { ApprovalStore } from "../approvals/store.js";
 import type { Logger } from "../logging/logger.js";
-import { isSafeShellCommand, ShellRunner } from "./shell-runner.js";
+import { validateShellCommandTargets } from "./shell-command-policy.js";
+import { ShellRunner } from "./shell-runner.js";
 import { describeAccessiblePath, type PathAccessPolicy, resolveAccessiblePath } from "./workspace.js";
 
 export function createRunShellCommandTool(
   pathAccessPolicy: PathAccessPolicy,
   approvalStore: ApprovalStore,
-  shellRunner: ShellRunner,
-  logger: Logger
+  _shellRunner: ShellRunner,
+  _logger: Logger
 ): ToolDefinition {
   return {
     name: "run_shell_command",
     description:
-      "Run a local shell command inside trusted local roots. Relative cwd uses the default workspace root; absolute cwd must stay inside allowed roots. Read-only commands can run immediately. Other commands require user approval first.",
+      "Prepare a local shell command inside trusted local roots. Relative cwd uses the default workspace root; absolute cwd must stay inside allowed roots. Every shell command requires user approval before execution.",
     parameters: {
       type: "object",
       properties: {
@@ -40,29 +41,20 @@ export function createRunShellCommandTool(
           pathAccessPolicy,
           typeof input.cwd === "string" ? input.cwd : "."
         );
-
-        if (!isSafeShellCommand(command)) {
-          const approval = approvalStore.createShellApproval(context.chatId, command.trim(), cwd);
+        const validation = validateShellCommandTargets(command.trim(), cwd, pathAccessPolicy);
+        if (!validation.ok) {
           return JSON.stringify({
             ok: false,
-            approvalRequired: true,
-            approvalId: approval.id,
-            message: `Command requires approval. Ask the user to send /approve ${approval.id} or /deny ${approval.id}.`,
-            cwd: describeAccessiblePath(pathAccessPolicy, cwd)
+            error: validation.error
           });
         }
 
-        logger.info("shell.command.safe", {
-          chatId: context.chatId,
-          cwd: describeAccessiblePath(pathAccessPolicy, cwd)
-        });
-
-        const result = await shellRunner.execute(command.trim(), cwd);
+        const approval = approvalStore.createShellApproval(context.chatId, command.trim(), cwd);
         return JSON.stringify({
-          ok: result.ok,
-          exitCode: result.exitCode,
-          stdout: result.stdout,
-          stderr: result.stderr,
+          ok: false,
+          approvalRequired: true,
+          approvalId: approval.id,
+          message: `Command requires approval. Ask the user to send /approve ${approval.id} or /deny ${approval.id}.`,
           cwd: describeAccessiblePath(pathAccessPolicy, cwd)
         });
       } catch (error) {

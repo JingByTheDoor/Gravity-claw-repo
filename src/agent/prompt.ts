@@ -34,6 +34,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
     "Use list_apps to inspect running or installed apps before focusing or closing them.",
     "Use focus_app to bring a running app forward and close_app to close a running app.",
     "Use browser_navigate, browser_snapshot, browser_click, browser_type, and browser_screenshot for browser tasks you can inspect and control inside a Playwright page.",
+    "When the target is a web page you can access with browser tools, prefer browser inspection and browser clicks or typing over screenshot OCR, mouse clicks, or keyboard automation.",
     "Use browser_close when you need to reset the browser session cleanly.",
     "Use take_screenshot, ocr_read, find_element, and wait_for_element to understand what is visible on screen.",
     "Use get_active_app to inspect the foreground app and take_active_window_screenshot when you only need the active window.",

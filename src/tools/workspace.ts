@@ -58,11 +58,19 @@ export function createPathAccessPolicy(
 }
 
 export function resolveAccessiblePath(policy: PathAccessPolicy, inputPath = "."): string {
+  return resolveAccessiblePathFrom(policy, policy.defaultRoot, inputPath);
+}
+
+export function resolveAccessiblePathFrom(
+  policy: PathAccessPolicy,
+  basePath: string,
+  inputPath = "."
+): string {
   const trimmedInput = inputPath.trim() || ".";
   const normalizedInput = normalizeSlashes(expandHomePath(trimmedInput));
   const candidatePath = path.isAbsolute(normalizedInput)
     ? path.resolve(normalizedInput)
-    : path.resolve(policy.defaultRoot, normalizedInput);
+    : path.resolve(basePath, normalizedInput);
 
   if (!policy.allowedRoots.some((root) => isPathInsideRoot(candidatePath, root))) {
     throw new Error("Path is outside the allowed local roots.");

@@ -21,12 +21,12 @@ export function createBrowserSnapshotTool(browserController: BrowserController):
       },
       additionalProperties: false
     },
-    async execute(input) {
+    async execute(input, context) {
       const maxTextLength = parseDesktopInteger(input.max_text_length);
       const maxElements = parseDesktopInteger(input.max_elements);
 
       return JSON.stringify(
-        await browserController.snapshot({
+        await browserController.snapshot(context.chatId, {
           ...(maxTextLength !== undefined ? { maxTextLength } : {}),
           ...(maxElements !== undefined ? { maxElements } : {})
         })

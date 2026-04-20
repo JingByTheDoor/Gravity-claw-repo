@@ -32,6 +32,7 @@ describe("Telegram message handler", () => {
   it("replies to whitelisted text messages", async () => {
     const handler = createMessageHandler({
       allowedUserId: "123",
+      allowedChatIds: [],
       agentLoop: {
         run: vi.fn(async () => ({
           replyText: "pong",
@@ -47,7 +48,7 @@ describe("Telegram message handler", () => {
 
     await handler({
       from: { id: 123 },
-      chat: { id: 77 },
+      chat: { id: 77, type: "private" },
       message: { text: "ping" },
       api: { sendChatAction },
       reply
@@ -60,6 +61,7 @@ describe("Telegram message handler", () => {
   it("silently ignores non-whitelisted users", async () => {
     const handler = createMessageHandler({
       allowedUserId: "123",
+      allowedChatIds: [],
       agentLoop: {
         run: vi.fn(async () => ({
           replyText: "pong",
@@ -74,7 +76,34 @@ describe("Telegram message handler", () => {
 
     await handler({
       from: { id: 999 },
-      chat: { id: 77 },
+      chat: { id: 77, type: "private" },
+      message: { text: "ping" },
+      api: { sendChatAction: vi.fn(async () => undefined) },
+      reply
+    });
+
+    expect(reply).not.toHaveBeenCalled();
+  });
+
+  it("ignores non-private chats even when the sender is allowed", async () => {
+    const handler = createMessageHandler({
+      allowedUserId: "123",
+      allowedChatIds: ["-1001"],
+      agentLoop: {
+        run: vi.fn(async () => ({
+          replyText: "pong",
+          attachments: []
+        }))
+      },
+      queue: new ChatTaskQueue(),
+      logger: createLogger("error")
+    });
+
+    const reply = vi.fn(async (_text: string) => undefined);
+
+    await handler({
+      from: { id: 123 },
+      chat: { id: -1001, type: "group" },
       message: { text: "ping" },
       api: { sendChatAction: vi.fn(async () => undefined) },
       reply
@@ -86,6 +115,7 @@ describe("Telegram message handler", () => {
   it("returns the text-only fallback for unsupported messages", async () => {
     const handler = createMessageHandler({
       allowedUserId: "123",
+      allowedChatIds: [],
       agentLoop: {
         run: vi.fn(async () => ({
           replyText: "pong",
@@ -100,7 +130,7 @@ describe("Telegram message handler", () => {
 
     await handler({
       from: { id: 123 },
-      chat: { id: 77 },
+      chat: { id: 77, type: "private" },
       message: {},
       api: { sendChatAction: vi.fn(async () => undefined) },
       reply
@@ -112,6 +142,7 @@ describe("Telegram message handler", () => {
   it("sends screenshot attachments as Telegram photos", async () => {
     const handler = createMessageHandler({
       allowedUserId: "123",
+      allowedChatIds: [],
       agentLoop: {
         run: vi.fn(async () => ({
           replyText: "Here is the screenshot.",
@@ -131,7 +162,7 @@ describe("Telegram message handler", () => {
 
     await handler({
       from: { id: 123 },
-      chat: { id: 77 },
+      chat: { id: 77, type: "private" },
       message: { text: "take screenshot" },
       api: { sendChatAction, sendPhoto },
       reply
@@ -144,6 +175,7 @@ describe("Telegram message handler", () => {
   it("forwards progress updates as separate Telegram messages", async () => {
     const handler = createMessageHandler({
       allowedUserId: "123",
+      allowedChatIds: [],
       agentLoop: {
         run: vi.fn(async (_chatId: string, _userInput: string, options) => {
           await options?.onProgress?.('Status: opening "Figma"');
@@ -163,7 +195,7 @@ describe("Telegram message handler", () => {
 
     await handler({
       from: { id: 123 },
-      chat: { id: 77 },
+      chat: { id: 77, type: "private" },
       message: { text: "open figma" },
       api: { sendChatAction: vi.fn(async () => undefined) },
       reply
@@ -199,6 +231,7 @@ describe("Telegram message handler", () => {
 
     const handler = createMessageHandler({
       allowedUserId: "123",
+      allowedChatIds: [],
       agentLoop: {
         run: agentLoopRun
       },
@@ -211,7 +244,7 @@ describe("Telegram message handler", () => {
 
     const firstMessagePromise = handler({
       from: { id: 123 },
-      chat: { id: 77 },
+      chat: { id: 77, type: "private" },
       message: { text: "start the task" },
       api: { sendChatAction: vi.fn(async () => undefined) },
       reply: firstReply
@@ -221,7 +254,7 @@ describe("Telegram message handler", () => {
 
     await handler({
       from: { id: 123 },
-      chat: { id: 77 },
+      chat: { id: 77, type: "private" },
       message: { text: "also keep the reply short" },
       api: { sendChatAction: vi.fn(async () => undefined) },
       reply: secondReply
@@ -243,6 +276,7 @@ describe("Telegram message handler", () => {
     const resetConversation = vi.fn(() => undefined);
     const handler = createNewCommandHandler({
       allowedUserId: "123",
+      allowedChatIds: [],
       memoryStore: {
         getPromptContext: vi.fn(() => ({
           coreFacts: [],
@@ -262,7 +296,7 @@ describe("Telegram message handler", () => {
 
     await handler({
       from: { id: 123 },
-      chat: { id: 77 },
+      chat: { id: 77, type: "private" },
       reply
     });
 
@@ -273,6 +307,7 @@ describe("Telegram message handler", () => {
   it("shows help text through /help", async () => {
     const handler = createHelpCommandHandler({
       allowedUserId: "123",
+      allowedChatIds: [],
       queue: new ChatTaskQueue(),
       logger: createLogger("error")
     });
@@ -280,7 +315,7 @@ describe("Telegram message handler", () => {
     const reply = vi.fn(async () => undefined);
     await handler({
       from: { id: 123 },
-      chat: { id: 77 },
+      chat: { id: 77, type: "private" },
       reply
     });
 
@@ -290,6 +325,7 @@ describe("Telegram message handler", () => {
   it("shows status details through /status", async () => {
     const handler = createStatusCommandHandler({
       allowedUserId: "123",
+      allowedChatIds: [],
       statusService: {
         getStatus: vi.fn(async () => ({
           bot: { id: 42, username: "gravity_claw_bot" },
@@ -317,7 +353,7 @@ describe("Telegram message handler", () => {
     const reply = vi.fn(async () => undefined);
     await handler({
       from: { id: 123 },
-      chat: { id: 77 },
+      chat: { id: 77, type: "private" },
       reply
     });
 
@@ -330,6 +366,7 @@ describe("Telegram message handler", () => {
     approvalStore.createShellApproval("77", "npm install", process.cwd());
     const handler = createApprovalsCommandHandler({
       allowedUserId: "123",
+      allowedChatIds: [],
       approvalStore,
       pathAccessPolicy: createPathAccessPolicy(process.cwd()),
       queue: new ChatTaskQueue(),
@@ -339,7 +376,7 @@ describe("Telegram message handler", () => {
     const reply = vi.fn(async () => undefined);
     await handler({
       from: { id: 123 },
-      chat: { id: 77 },
+      chat: { id: 77, type: "private" },
       reply
     });
 
@@ -361,6 +398,7 @@ describe("Telegram message handler", () => {
 
     const handler = createApproveCommandHandler({
       allowedUserId: "123",
+      allowedChatIds: [],
       approvalStore,
       shellRunner: shellRunner as never,
       pathAccessPolicy: createPathAccessPolicy(process.cwd()),
@@ -372,7 +410,7 @@ describe("Telegram message handler", () => {
     await handler(
       {
         from: { id: 123 },
-        chat: { id: 77 },
+        chat: { id: 77, type: "private" },
         reply
       },
       approval.id
@@ -387,6 +425,7 @@ describe("Telegram message handler", () => {
     const approval = approvalStore.createShellApproval("77", "npm install", process.cwd());
     const handler = createDenyCommandHandler({
       allowedUserId: "123",
+      allowedChatIds: [],
       approvalStore,
       shellRunner: { executeApproval: vi.fn() } as never,
       pathAccessPolicy: createPathAccessPolicy(process.cwd()),
@@ -398,7 +437,7 @@ describe("Telegram message handler", () => {
     await handler(
       {
         from: { id: 123 },
-        chat: { id: 77 },
+        chat: { id: 77, type: "private" },
         reply
       },
       approval.id
@@ -412,6 +451,7 @@ describe("Telegram message handler", () => {
     errorStore.record("77", "agent.run", "Vision pipeline crashed");
     const handler = createLastErrorCommandHandler({
       allowedUserId: "123",
+      allowedChatIds: [],
       errorStore,
       queue: new ChatTaskQueue(),
       logger: createLogger("error")
@@ -420,7 +460,7 @@ describe("Telegram message handler", () => {
     const reply = vi.fn(async () => undefined);
     await handler({
       from: { id: 123 },
-      chat: { id: 77 },
+      chat: { id: 77, type: "private" },
       reply
     });
 
@@ -432,6 +472,7 @@ describe("Telegram message handler", () => {
     queue.beginActiveRun("77");
     const handler = createCancelCommandHandler({
       allowedUserId: "123",
+      allowedChatIds: [],
       queue,
       logger: createLogger("error")
     });
@@ -439,7 +480,7 @@ describe("Telegram message handler", () => {
     const reply = vi.fn(async () => undefined);
     await handler({
       from: { id: 123 },
-      chat: { id: 77 },
+      chat: { id: 77, type: "private" },
       reply
     });
 
@@ -450,6 +491,7 @@ describe("Telegram message handler", () => {
   it("reports when there is no task to cancel", async () => {
     const handler = createCancelCommandHandler({
       allowedUserId: "123",
+      allowedChatIds: [],
       queue: new ChatTaskQueue(),
       logger: createLogger("error")
     });
@@ -457,7 +499,7 @@ describe("Telegram message handler", () => {
     const reply = vi.fn(async () => undefined);
     await handler({
       from: { id: 123 },
-      chat: { id: 77 },
+      chat: { id: 77, type: "private" },
       reply
     });
 

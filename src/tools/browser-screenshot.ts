@@ -21,11 +21,11 @@ export function createBrowserScreenshotTool(browserController: BrowserController
       },
       additionalProperties: false
     },
-    async execute(input) {
+    async execute(input, context) {
       const outputPath = typeof input.output_path === "string" ? input.output_path.trim() : "";
 
       return JSON.stringify(
-        await browserController.screenshot({
+        await browserController.screenshot(context.chatId, {
           ...(outputPath ? { outputPath } : {}),
           ...(input.full_page !== undefined
             ? { fullPage: parseDesktopBoolean(input.full_page, true) }

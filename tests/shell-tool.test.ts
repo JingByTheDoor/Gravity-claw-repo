@@ -43,7 +43,7 @@ describe("run_shell_command tool", () => {
     expect(approvalStore.listPending("chat-1")).toHaveLength(1);
   });
 
-  it("runs safe read-only shell commands immediately", async () => {
+  it("requires approval even for read-only shell commands", async () => {
     const approvalStore = new ApprovalStore();
     const shellRunner = {
       execute: vi.fn(async (): Promise<ShellExecutionResult> => ({
@@ -64,13 +64,14 @@ describe("run_shell_command tool", () => {
     const result = JSON.parse(
       await tool.execute({ command: "git status" }, { chatId: "chat-1" })
     ) as {
-      ok: boolean;
-      stdout: string;
+      approvalRequired: boolean;
+      approvalId: string;
     };
 
-    expect(result.ok).toBe(true);
-    expect(result.stdout).toBe("status output");
-    expect(approvalStore.listPending("chat-1")).toHaveLength(0);
+    expect(result.approvalRequired).toBe(true);
+    expect(result.approvalId).toBeTruthy();
+    expect(shellRunner.execute).not.toHaveBeenCalled();
+    expect(approvalStore.listPending("chat-1")).toHaveLength(1);
   });
 
   it("allows absolute cwd inside extra trusted roots", async () => {
@@ -96,12 +97,15 @@ describe("run_shell_command tool", () => {
     const result = JSON.parse(
       await tool.execute({ command: "git status", cwd: otherRoot }, { chatId: "chat-1" })
     ) as {
-      ok: boolean;
+      approvalRequired: boolean;
+      approvalId: string;
       cwd: string;
     };
 
-    expect(result.ok).toBe(true);
+    expect(result.approvalRequired).toBe(true);
+    expect(result.approvalId).toBeTruthy();
     expect(result.cwd).toBe(otherRoot);
+    expect(shellRunner.execute).not.toHaveBeenCalled();
   });
 
   it("rejects cwd outside trusted roots", async () => {
@@ -136,12 +140,51 @@ describe("run_shell_command tool", () => {
     expect(shellRunner.execute).not.toHaveBeenCalled();
   });
 
-  it("treats common build and inspection commands as safe", () => {
-    expect(isSafeShellCommand("npm test")).toBe(true);
-    expect(isSafeShellCommand("npm run build")).toBe(true);
-    expect(isSafeShellCommand("npm run typecheck")).toBe(true);
-    expect(isSafeShellCommand("tsc --noEmit")).toBe(true);
-    expect(isSafeShellCommand("git show HEAD~1")).toBe(true);
-    expect(isSafeShellCommand("git diff --stat")).toBe(true);
+  it("does not treat npm scripts as safe read-only commands", () => {
+    expect(isSafeShellCommand("npm test")).toBe(false);
+    expect(isSafeShellCommand("npm run build")).toBe(false);
+    expect(isSafeShellCommand("npm run typecheck")).toBe(false);
+  });
+
+  it("rejects safe commands that target files outside trusted roots", async () => {
+    const approvalStore = new ApprovalStore();
+    const shellRunner = {
+      execute: vi.fn(async (): Promise<ShellExecutionResult> => ({
+        ok: true,
+        exitCode: 0,
+        stdout: "blocked",
+        stderr: ""
+      }))
+    };
+
+    const workspaceRoot = createTempRoot();
+    const outsideRoot = createTempRoot();
+    const tool = createRunShellCommandTool(
+      createPathAccessPolicy(workspaceRoot),
+      approvalStore,
+      shellRunner as never,
+      createLogger("error")
+    );
+
+    const result = JSON.parse(
+      await tool.execute(
+        { command: `Get-Content "${path.join(outsideRoot, "secret.txt")}"` },
+        { chatId: "chat-1" }
+      )
+    ) as {
+      ok: boolean;
+      error: string;
+    };
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("outside the allowed local roots");
+    expect(shellRunner.execute).not.toHaveBeenCalled();
+    expect(approvalStore.listPending("chat-1")).toHaveLength(0);
+  });
+
+  it("does not auto-approve any shell commands", () => {
+    expect(isSafeShellCommand("tsc --noEmit")).toBe(false);
+    expect(isSafeShellCommand("git show HEAD~1")).toBe(false);
+    expect(isSafeShellCommand("git diff --stat")).toBe(false);
   });
 });

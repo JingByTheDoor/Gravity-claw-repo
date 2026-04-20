@@ -1,19 +1,19 @@
 export class ChatTaskQueue {
-  private readonly lanes = new Map<string, Promise<unknown>>();
+  private lane: Promise<unknown> = Promise.resolve();
   private readonly activeRuns = new Set<string>();
   private readonly steeringMessages = new Map<string, string[]>();
   private readonly cancelRequests = new Set<string>();
 
-  run<T>(chatId: string, task: () => Promise<T>): Promise<T> {
-    const previous = this.lanes.get(chatId) ?? Promise.resolve();
+  run<T>(_chatId: string, task: () => Promise<T>): Promise<T> {
+    const previous = this.lane;
     const next = previous.catch(() => undefined).then(task);
     const settled = next.finally(() => {
-      if (this.lanes.get(chatId) === settled) {
-        this.lanes.delete(chatId);
+      if (this.lane === settled) {
+        this.lane = Promise.resolve();
       }
     });
 
-    this.lanes.set(chatId, settled);
+    this.lane = settled;
     return next;
   }
 

@@ -46,7 +46,7 @@ export function createBrowserTypeTool(browserController: BrowserController): Too
       required: ["text"],
       additionalProperties: false
     },
-    async execute(input) {
+    async execute(input, context) {
       const text = input.text;
       if (typeof text !== "string" || text.length === 0) {
         return JSON.stringify({ ok: false, error: "text must be a non-empty string." });
@@ -66,6 +66,7 @@ export function createBrowserTypeTool(browserController: BrowserController): Too
       const timeoutMs = parseDesktopInteger(input.timeout_ms);
       return JSON.stringify(
         await browserController.type(
+          context.chatId,
           {
             text,
             ...(selector ? { selector } : {}),

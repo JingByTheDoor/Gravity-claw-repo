@@ -1,34 +1,6 @@
 import { spawn } from "node:child_process";
 import type { PendingApproval } from "../approvals/store.js";
 
-const SAFE_COMMAND_PREFIXES = [
-  "get-date",
-  "get-location",
-  "pwd",
-  "ls",
-  "dir",
-  "get-childitem",
-  "get-content",
-  "type ",
-  "cat ",
-  "select-string",
-  "rg ",
-  "git status",
-  "git diff",
-  "git diff --stat",
-  "git log",
-  "git show",
-  "whoami",
-  "node -v",
-  "npm -v",
-  "npm test",
-  "npm run build",
-  "npm run typecheck",
-  "tsc --noemit",
-  "ollama list",
-  "ollama ps"
-];
-
 export interface ShellExecutionResult {
   ok: boolean;
   exitCode: number | null;
@@ -41,8 +13,7 @@ function truncateOutput(value: string, maxLength = 4000): string {
 }
 
 export function isSafeShellCommand(command: string): boolean {
-  const normalized = command.trim().toLowerCase();
-  return SAFE_COMMAND_PREFIXES.some((prefix) => normalized === prefix || normalized.startsWith(`${prefix} `));
+  return false;
 }
 
 export class ShellRunner {

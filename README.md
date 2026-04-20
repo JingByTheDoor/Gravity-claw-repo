@@ -38,10 +38,10 @@ Level 4 tools-ready foundation for a local-first Telegram AI agent.
   - `list_files`
   - `read_file`
   - `search_files`
-  - `write_file`
-  - `replace_in_file`
-  - `run_shell_command`
-- Telegram user ID allowlist
+- `write_file`
+- `replace_in_file`
+- `run_shell_command`
+- Telegram user ID allowlist plus private-chat-only authorization
 
 ## What is still not included
 
@@ -63,6 +63,7 @@ Level 4 tools-ready foundation for a local-first Telegram AI agent.
 
 1. Copy `.env.example` to `.env`
 2. Fill in `TELEGRAM_BOT_TOKEN` and `TELEGRAM_ALLOWED_USER_ID`
+   The bot only answers that user in a private chat. Optionally set `TELEGRAM_ALLOWED_CHAT_IDS` to pin it to specific approved private chat IDs.
 3. Make sure Ollama is running and the configured model exists
 4. Optional: set `OLLAMA_FAST_MODEL` to a smaller local model if you want every task to hit a fast router first and escalate harder requests to `OLLAMA_MODEL`
 5. Optional: set `OLLAMA_VISION_MODEL` to a multimodal local model if you want reliable OCR and element-finding results. If unset, it falls back to `OLLAMA_MODEL`.
@@ -131,7 +132,7 @@ npm run build
 
 ## Notes
 
-- Unauthorized Telegram users are ignored silently.
+- Unauthorized Telegram users and non-private or unauthorized private chats are ignored silently.
 - The bot accepts text messages only.
 - Small local models can miss tool calls or need simpler prompts. This is expected at this stage.
 - If `OLLAMA_FAST_MODEL` is set, the fast model sees each task first, keeps easy tasks for itself, and rewrites/escalates harder ones to `OLLAMA_MODEL`.
@@ -145,7 +146,7 @@ npm run build
 - Use `/approvals` to list pending shell approvals.
 - Use `/cancel` to request cancellation of the current task.
 - Use `/approve <id>` or `/deny <id>` for shell commands that require confirmation.
-- Read-only shell commands may run immediately; mutating or unclear commands require approval first.
+- All shell commands require approval first. Path validation still blocks commands that target paths outside the trusted local roots.
 - By default, file tools stay in `WORKSPACE_ROOT`. Add `TOOL_ALLOWED_ROOTS` in `.env` to let the bot inspect extra trusted folders with absolute paths.
 - Screenshots are saved under `artifacts/screenshots/` by default.
-- Browser tools use a persistent Playwright page, so cookies and session state can carry across browser tool calls until `browser_close` resets the session.
+- Browser tools keep a separate Playwright session per Telegram chat until `browser_close` resets that chat's browser state.

@@ -22,14 +22,17 @@ export function createBrowserNavigateTool(browserController: BrowserController):
       required: ["url"],
       additionalProperties: false
     },
-    async execute(input) {
+    async execute(input, context) {
       const url = input.url;
       if (typeof url !== "string" || url.trim().length === 0) {
         return JSON.stringify({ ok: false, error: "url must be a non-empty string." });
       }
+      if (/^file:/i.test(url.trim())) {
+        return JSON.stringify({ ok: false, error: "file: URLs are blocked." });
+      }
 
       const timeoutMs = parseDesktopInteger(input.timeout_ms);
-      return JSON.stringify(await browserController.navigate(url, timeoutMs));
+      return JSON.stringify(await browserController.navigate(context.chatId, url, timeoutMs));
     }
   };
 }

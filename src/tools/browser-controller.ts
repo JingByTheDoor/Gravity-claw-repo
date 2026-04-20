@@ -100,6 +100,13 @@ interface BrowserControllerOptions {
   platform?: NodeJS.Platform;
 }
 
+interface BrowserSessionState {
+  browser: Browser | undefined;
+  context: BrowserContext | undefined;
+  page: Page | undefined;
+  pageInitialization: Promise<Page> | undefined;
+}
+
 function clampPositiveInteger(value: number | undefined, fallback: number): number {
   if (!value || value <= 0) {
     return fallback;
@@ -136,8 +143,12 @@ function normalizeUrl(rawUrl: string): string {
     throw new Error("url must be a non-empty string.");
   }
 
+  if (/^file:/i.test(trimmed)) {
+    throw new Error("file: URLs are blocked.");
+  }
+
   const explicitSchemePattern = /^[a-z][a-z0-9+.-]*:\/\//i;
-  const localSchemePattern = /^(about|data|file|mailto|tel):/i;
+  const localSchemePattern = /^(about|data|mailto|tel):/i;
   if (explicitSchemePattern.test(trimmed) || localSchemePattern.test(trimmed)) {
     return trimmed;
   }
@@ -147,13 +158,20 @@ function normalizeUrl(rawUrl: string): string {
   return new URL(withScheme).toString();
 }
 
+function isPathInsideDirectory(targetPath: string, directoryPath: string): boolean {
+  const resolvedTarget = path.resolve(targetPath);
+  const resolvedDirectory = path.resolve(directoryPath);
+
+  return (
+    resolvedTarget === resolvedDirectory ||
+    resolvedTarget.startsWith(`${resolvedDirectory}${path.sep}`)
+  );
+}
+
 export class BrowserController {
   private readonly artifactsDir: string;
   private readonly platform: NodeJS.Platform;
-  private browser: Browser | undefined;
-  private context: BrowserContext | undefined;
-  private page: Page | undefined;
-  private pageInitialization: Promise<Page> | undefined;
+  private readonly sessions = new Map<string, BrowserSessionState>();
 
   constructor(private readonly options: BrowserControllerOptions) {
     this.artifactsDir =
@@ -161,8 +179,8 @@ export class BrowserController {
     this.platform = options.platform ?? process.platform;
   }
 
-  async navigate(url: string, timeoutMs?: number): Promise<BrowserNavigateResult> {
-    const page = await this.ensurePage();
+  async navigate(chatId: string, url: string, timeoutMs?: number): Promise<BrowserNavigateResult> {
+    const page = await this.ensurePage(chatId);
     const response = await page.goto(normalizeUrl(url), {
       waitUntil: "domcontentloaded",
       timeout: clampPositiveInteger(timeoutMs, DEFAULT_TIMEOUT_MS)
@@ -175,8 +193,8 @@ export class BrowserController {
     };
   }
 
-  async snapshot(options: BrowserSnapshotOptions = {}): Promise<BrowserSnapshotResult> {
-    const page = await this.ensurePage();
+  async snapshot(chatId: string, options: BrowserSnapshotOptions = {}): Promise<BrowserSnapshotResult> {
+    const page = await this.ensurePage(chatId);
     const maxTextLength = clampPositiveInteger(options.maxTextLength, DEFAULT_MAX_TEXT_LENGTH);
     const maxElements = clampPositiveInteger(options.maxElements, DEFAULT_MAX_ELEMENTS);
     const snapshot = await page.evaluate(
@@ -336,8 +354,13 @@ export class BrowserController {
     };
   }
 
-  async click(target: BrowserClickTarget, timeoutMs?: number): Promise<BrowserClickResult> {
-    const page = await this.ensurePage();
+  async click(
+    chatId: string,
+    target: BrowserClickTarget,
+    timeoutMs?: number
+  ): Promise<BrowserClickResult> {
+    const session = this.getSession(chatId);
+    const page = await this.ensurePage(chatId);
     const timeout = clampPositiveInteger(timeoutMs, DEFAULT_TIMEOUT_MS);
     const locator = this.resolveClickLocator(page, target);
     const popupPromise = page.waitForEvent("popup", {
@@ -348,7 +371,7 @@ export class BrowserController {
     const popupPage = await popupPromise;
     const activePage = popupPage ?? page;
     if (popupPage) {
-      this.page = popupPage;
+      session.page = popupPage;
     }
 
     await activePage.waitForLoadState("domcontentloaded", { timeout }).catch(() => undefined);
@@ -360,8 +383,12 @@ export class BrowserController {
     };
   }
 
-  async type(options: BrowserTypeOptions, timeoutMs?: number): Promise<BrowserTypeResult> {
-    const page = await this.ensurePage();
+  async type(
+    chatId: string,
+    options: BrowserTypeOptions,
+    timeoutMs?: number
+  ): Promise<BrowserTypeResult> {
+    const page = await this.ensurePage(chatId);
     const timeout = clampPositiveInteger(timeoutMs, DEFAULT_TIMEOUT_MS);
     const locator = this.resolveTypeLocator(page, options);
 
@@ -387,12 +414,13 @@ export class BrowserController {
     };
   }
 
-  async screenshot(options: BrowserScreenshotOptions = {}): Promise<BrowserScreenshotResult> {
-    const page = await this.ensurePage();
+  async screenshot(
+    chatId: string,
+    options: BrowserScreenshotOptions = {}
+  ): Promise<BrowserScreenshotResult> {
+    const page = await this.ensurePage(chatId);
     await fs.mkdir(this.artifactsDir, { recursive: true });
-    const outputPath = options.outputPath
-      ? path.resolve(options.outputPath)
-      : path.join(this.artifactsDir, `browser-${Date.now()}.png`);
+    const outputPath = await this.resolveScreenshotOutputPath(options.outputPath, "browser");
     await fs.mkdir(path.dirname(outputPath), { recursive: true });
 
     await page.screenshot({
@@ -408,27 +436,36 @@ export class BrowserController {
     };
   }
 
-  async close(): Promise<BrowserCloseResult> {
+  async close(chatId: string): Promise<BrowserCloseResult> {
+    const session = this.sessions.get(chatId);
+    if (!session) {
+      return {
+        ok: true,
+        closed: false
+      };
+    }
+
     const hadSession = Boolean(
-      this.pageInitialization ||
-        (this.page && !this.page.isClosed()) ||
-        this.context ||
-        (this.browser && this.browser.isConnected())
+      session.pageInitialization ||
+        (session.page && !session.page.isClosed()) ||
+        session.context ||
+        (session.browser && session.browser.isConnected())
     );
 
-    this.pageInitialization = undefined;
+    session.pageInitialization = undefined;
 
     try {
-      if (this.context) {
-        await this.context.close();
+      if (session.context) {
+        await session.context.close();
       }
-      if (this.browser?.isConnected()) {
-        await this.browser.close();
+      if (session.browser?.isConnected()) {
+        await session.browser.close();
       }
     } finally {
-      this.page = undefined;
-      this.context = undefined;
-      this.browser = undefined;
+      session.page = undefined;
+      session.context = undefined;
+      session.browser = undefined;
+      this.sessions.delete(chatId);
     }
 
     return {
@@ -437,37 +474,54 @@ export class BrowserController {
     };
   }
 
-  private async ensurePage(): Promise<Page> {
-    if (this.page && !this.page.isClosed()) {
-      return this.page;
+  private getSession(chatId: string): BrowserSessionState {
+    const existingSession = this.sessions.get(chatId);
+    if (existingSession) {
+      return existingSession;
     }
 
-    if (this.pageInitialization) {
-      return this.pageInitialization;
+    const newSession: BrowserSessionState = {
+      browser: undefined,
+      context: undefined,
+      page: undefined,
+      pageInitialization: undefined
+    };
+    this.sessions.set(chatId, newSession);
+    return newSession;
+  }
+
+  private async ensurePage(chatId: string): Promise<Page> {
+    const session = this.getSession(chatId);
+    if (session.page && !session.page.isClosed()) {
+      return session.page;
     }
 
-    this.pageInitialization = this.initializePage();
+    if (session.pageInitialization) {
+      return session.pageInitialization;
+    }
+
+    session.pageInitialization = this.initializePage(chatId, session);
     try {
-      const page = await this.pageInitialization;
-      this.page = page;
+      const page = await session.pageInitialization;
+      session.page = page;
       return page;
     } finally {
-      this.pageInitialization = undefined;
+      session.pageInitialization = undefined;
     }
   }
 
-  private async initializePage(): Promise<Page> {
-    const browser = await this.ensureBrowser();
-    const context = await this.ensureContext(browser);
+  private async initializePage(chatId: string, session: BrowserSessionState): Promise<Page> {
+    const browser = await this.ensureBrowser(chatId, session);
+    const context = await this.ensureContext(session, browser);
     const page = await context.newPage();
     page.setDefaultTimeout(DEFAULT_TIMEOUT_MS);
     page.setDefaultNavigationTimeout(DEFAULT_TIMEOUT_MS);
     return page;
   }
 
-  private async ensureBrowser(): Promise<Browser> {
-    if (this.browser?.isConnected()) {
-      return this.browser;
+  private async ensureBrowser(chatId: string, session: BrowserSessionState): Promise<Browser> {
+    if (session.browser?.isConnected()) {
+      return session.browser;
     }
 
     const launchOptions: LaunchOptions = {
@@ -475,7 +529,7 @@ export class BrowserController {
     };
 
     try {
-      this.browser = await chromium.launch(launchOptions);
+      session.browser = await chromium.launch(launchOptions);
     } catch (error) {
       if (this.platform !== "win32") {
         throw error;
@@ -484,34 +538,66 @@ export class BrowserController {
       this.options.logger.warn("browser.launch.chromium_failed", {
         error: error instanceof Error ? error.message : String(error)
       });
-      this.browser = await chromium.launch({
+      session.browser = await chromium.launch({
         headless: true,
         channel: "msedge"
       });
     }
 
-    this.browser.on("disconnected", () => {
-      this.browser = undefined;
-      this.context = undefined;
-      this.page = undefined;
+    session.browser.on("disconnected", () => {
+      const currentSession = this.sessions.get(chatId);
+      if (currentSession !== session) {
+        return;
+      }
+
+      session.browser = undefined;
+      session.context = undefined;
+      session.page = undefined;
+      session.pageInitialization = undefined;
+      this.sessions.delete(chatId);
     });
 
-    return this.browser;
+    return session.browser;
   }
 
-  private async ensureContext(browser: Browser): Promise<BrowserContext> {
-    if (this.context) {
-      return this.context;
+  private async ensureContext(
+    session: BrowserSessionState,
+    browser: Browser
+  ): Promise<BrowserContext> {
+    if (session.context) {
+      return session.context;
     }
 
-    this.context = await browser.newContext({
+    session.context = await browser.newContext({
       viewport: {
         width: 1440,
         height: 900
       },
       ignoreHTTPSErrors: true
     });
-    return this.context;
+    return session.context;
+  }
+
+  private async resolveScreenshotOutputPath(
+    outputPath: string | undefined,
+    prefix: string
+  ): Promise<string> {
+    const trimmedOutputPath = outputPath?.trim();
+    const resolvedPath =
+      !trimmedOutputPath
+        ? path.join(this.artifactsDir, `${prefix}-${Date.now()}.png`)
+        : path.isAbsolute(trimmedOutputPath)
+          ? path.resolve(trimmedOutputPath)
+          : /[\\/]/.test(trimmedOutputPath)
+            ? path.resolve(trimmedOutputPath)
+            : path.join(this.artifactsDir, trimmedOutputPath);
+
+    if (!isPathInsideDirectory(resolvedPath, this.artifactsDir)) {
+      throw new Error("Screenshot output path must stay inside the screenshots artifacts directory.");
+    }
+
+    await fs.mkdir(path.dirname(resolvedPath), { recursive: true });
+    return resolvedPath;
   }
 
   private async getPageSummary(page: Page): Promise<{ url: string; title: string }> {

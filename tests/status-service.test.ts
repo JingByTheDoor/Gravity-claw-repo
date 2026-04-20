@@ -27,6 +27,7 @@ function createEnv(databasePath: string): AppEnv {
   return {
     telegramBotToken: "token",
     telegramAllowedUserId: "123",
+    telegramAllowedChatIds: [],
     ollamaHost: "http://127.0.0.1:11434",
     ollamaModel: "qwen2.5:3b",
     ollamaFastModel: "qwen2.5:1.5b",
