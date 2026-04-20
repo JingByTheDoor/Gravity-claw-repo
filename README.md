@@ -14,6 +14,12 @@ Level 4 tools-ready foundation for a local-first Telegram AI agent.
   - `remember_fact`
   - `recall_memory`
   - `launch_app`
+  - `browser_navigate`
+  - `browser_snapshot`
+  - `browser_click`
+  - `browser_type`
+  - `browser_screenshot`
+  - `browser_close`
   - `list_apps`
   - `focus_app`
   - `close_app`
@@ -67,6 +73,12 @@ Level 4 tools-ready foundation for a local-first Telegram AI agent.
 
 ```bash
 npm install
+```
+
+10. If Playwright does not find a browser on this machine, install Chromium once:
+
+```bash
+npm run install:browser
 ```
 
 ## Run
@@ -136,3 +148,4 @@ npm run build
 - Read-only shell commands may run immediately; mutating or unclear commands require approval first.
 - By default, file tools stay in `WORKSPACE_ROOT`. Add `TOOL_ALLOWED_ROOTS` in `.env` to let the bot inspect extra trusted folders with absolute paths.
 - Screenshots are saved under `artifacts/screenshots/` by default.
+- Browser tools use a persistent Playwright page, so cookies and session state can carry across browser tool calls until `browser_close` resets the session.

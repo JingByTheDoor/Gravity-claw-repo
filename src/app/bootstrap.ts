@@ -12,6 +12,7 @@ import { MemoryStore } from "../memory/store.js";
 import { createBot } from "../telegram/bot.js";
 import { StatusService } from "./status-service.js";
 import { AppLauncher } from "../tools/app-launcher.js";
+import { BrowserController } from "../tools/browser-controller.js";
 import { DesktopController } from "../tools/desktop-controller.js";
 import { createDefaultToolRegistry } from "../tools/registry.js";
 import { ShellRunner } from "../tools/shell-runner.js";
@@ -28,6 +29,7 @@ export interface AppServices {
   errorStore: RuntimeErrorStore;
   shellRunner: ShellRunner;
   appLauncher: AppLauncher;
+  browserController: BrowserController;
   desktopController: DesktopController;
   visionClient: VisionClient;
   statusService: StatusService;
@@ -46,6 +48,7 @@ export async function buildApp(env: AppEnv = loadEnv()): Promise<AppServices> {
   const errorStore = new RuntimeErrorStore(env.databasePath);
   const shellRunner = new ShellRunner();
   const appLauncher = new AppLauncher({ logger });
+  const browserController = new BrowserController({ logger });
   const desktopController = new DesktopController({ logger, appLauncher });
   const visionClient = new VisionClient({
     host: env.ollamaHost,
@@ -65,6 +68,7 @@ export async function buildApp(env: AppEnv = loadEnv()): Promise<AppServices> {
     approvalStore,
     shellRunner,
     appLauncher,
+    browserController,
     desktopController,
     visionClient,
     logger
@@ -134,6 +138,7 @@ export async function buildApp(env: AppEnv = loadEnv()): Promise<AppServices> {
     errorStore,
     shellRunner,
     appLauncher,
+    browserController,
     desktopController,
     visionClient,
     statusService

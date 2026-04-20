@@ -3,6 +3,13 @@ import { ApprovalStore } from "../approvals/store.js";
 import type { Logger } from "../logging/logger.js";
 import { MemoryStore } from "../memory/store.js";
 import { AppLauncher } from "./app-launcher.js";
+import { BrowserController } from "./browser-controller.js";
+import { createBrowserClickTool } from "./browser-click.js";
+import { createBrowserCloseTool } from "./browser-close.js";
+import { createBrowserNavigateTool } from "./browser-navigate.js";
+import { createBrowserScreenshotTool } from "./browser-screenshot.js";
+import { createBrowserSnapshotTool } from "./browser-snapshot.js";
+import { createBrowserTypeTool } from "./browser-type.js";
 import { createClipboardReadTool } from "./clipboard-read.js";
 import { createClipboardWriteTool } from "./clipboard-write.js";
 import { createClickElementTool } from "./click-element.js";
@@ -77,6 +84,7 @@ interface CreateDefaultToolRegistryOptions {
   approvalStore: ApprovalStore;
   shellRunner: ShellRunner;
   appLauncher: AppLauncher;
+  browserController: BrowserController;
   desktopController: DesktopController;
   visionClient: VisionClient;
   logger: Logger;
@@ -88,6 +96,12 @@ export function createDefaultToolRegistry(options: CreateDefaultToolRegistryOpti
     createRememberFactTool(options.memoryStore),
     createRecallMemoryTool(options.memoryStore),
     createLaunchAppTool(options.appLauncher),
+    createBrowserNavigateTool(options.browserController),
+    createBrowserSnapshotTool(options.browserController),
+    createBrowserClickTool(options.browserController),
+    createBrowserTypeTool(options.browserController),
+    createBrowserScreenshotTool(options.browserController),
+    createBrowserCloseTool(options.browserController),
     createListAppsTool(options.desktopController),
     createFocusAppTool(options.desktopController),
     createCloseAppTool(options.desktopController),
