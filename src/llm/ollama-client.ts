@@ -98,47 +98,52 @@ export class OllamaClient implements LLMClient {
   }
 
   async runStep(request: LLMRunRequest): Promise<LLMRunResponse> {
-    const response = await fetch(this.buildUrl("/api/chat"), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model: this.options.model,
-        stream: false,
-        messages: request.messages.map((message) => this.toOllamaMessage(message)),
-        tools: request.tools.map((tool) => ({
-          type: "function",
-          function: {
-            name: tool.name,
-            description: tool.description,
-            parameters: tool.parameters
+    const url = this.buildUrl("/api/chat");
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          model: this.options.model,
+          stream: false,
+          messages: request.messages.map((message) => this.toOllamaMessage(message)),
+          tools: request.tools.map((tool) => ({
+            type: "function",
+            function: {
+              name: tool.name,
+              description: tool.description,
+              parameters: tool.parameters
+            }
+          })),
+          options: {
+            temperature: 0
           }
-        })),
-        options: {
-          temperature: 0
-        }
-      })
-    });
+        })
+      });
 
-    if (!response.ok) {
-      throw new Error(`Ollama chat request failed with status ${response.status}`);
-    }
-
-    const payload = (await response.json()) as OllamaChatResponse;
-    if (!payload.message) {
-      throw new Error("Ollama response did not include a message payload.");
-    }
-
-    const toolCalls = this.parseToolCalls(payload.message.tool_calls);
-
-    return {
-      message: {
-        role: "assistant",
-        content: payload.message.content ?? "",
-        ...(toolCalls ? { toolCalls } : {})
+      if (!response.ok) {
+        throw new Error(`status ${response.status}`);
       }
-    };
+
+      const payload = (await response.json()) as OllamaChatResponse;
+      if (!payload.message) {
+        throw new Error("missing message payload");
+      }
+
+      const toolCalls = this.parseToolCalls(payload.message.tool_calls);
+
+      return {
+        message: {
+          role: "assistant",
+          content: payload.message.content ?? "",
+          ...(toolCalls ? { toolCalls } : {})
+        }
+      };
+    } catch (error) {
+      throw this.normalizeChatError(error, url);
+    }
   }
 
   private buildUrl(pathname: string): string {
@@ -160,6 +165,22 @@ export class OllamaClient implements LLMClient {
     }
 
     return new Error(`Ollama is unreachable at ${this.options.host}: ${String(error)}`);
+  }
+
+  private normalizeChatError(error: unknown, url: string): Error {
+    if (error instanceof Error) {
+      if (/^Ollama chat request failed/i.test(error.message)) {
+        return error;
+      }
+
+      return new Error(
+        `Ollama chat request failed for model "${this.options.model}" at ${url}: ${error.message}`
+      );
+    }
+
+    return new Error(
+      `Ollama chat request failed for model "${this.options.model}" at ${url}: ${String(error)}`
+    );
   }
 
   private shouldRetryHealthCheck(error: Error, attempt: number, maxAttempts: number): boolean {

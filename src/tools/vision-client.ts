@@ -131,49 +131,70 @@ export class VisionClient {
     prompt: string
   ): Promise<Record<string, unknown>> {
     const imageBytes = await fs.readFile(imagePath);
-    const response = await this.fetchImpl(this.buildUrl("/api/chat"), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model: this.options.model,
-        stream: false,
-        format: "json",
-        messages: [{
-          role: "user",
-          content: prompt,
-          images: [imageBytes.toString("base64")]
-        } satisfies OllamaVisionMessage],
-        options: {
-          temperature: 0
-        }
-      })
-    });
+    const url = this.buildUrl("/api/chat");
+    try {
+      const response = await this.fetchImpl(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          model: this.options.model,
+          stream: false,
+          format: "json",
+          messages: [{
+            role: "user",
+            content: prompt,
+            images: [imageBytes.toString("base64")]
+          } satisfies OllamaVisionMessage],
+          options: {
+            temperature: 0
+          }
+        })
+      });
 
-    if (!response.ok) {
-      throw new Error(`Ollama vision request failed with status ${response.status}`);
+      if (!response.ok) {
+        throw new Error(`status ${response.status}`);
+      }
+
+      const payload = (await response.json()) as OllamaVisionResponse;
+      const content = payload.message?.content;
+      if (!content) {
+        throw new Error("missing message content");
+      }
+
+      const jsonString = extractJsonObject(content);
+      const parsed = JSON.parse(jsonString) as Record<string, unknown>;
+
+      this.options.logger.debug("vision.response.ok", {
+        imagePath,
+        promptLength: prompt.length
+      });
+
+      return parsed;
+    } catch (error) {
+      throw this.normalizeVisionError(error, url, imagePath);
     }
-
-    const payload = (await response.json()) as OllamaVisionResponse;
-    const content = payload.message?.content;
-    if (!content) {
-      throw new Error("Ollama vision response did not include message content.");
-    }
-
-    const jsonString = extractJsonObject(content);
-    const parsed = JSON.parse(jsonString) as Record<string, unknown>;
-
-    this.options.logger.debug("vision.response.ok", {
-      imagePath,
-      promptLength: prompt.length
-    });
-
-    return parsed;
   }
 
   private buildUrl(pathname: string): string {
     const base = this.options.host.replace(/\/+$/, "");
     return `${base}${pathname}`;
+  }
+
+  private normalizeVisionError(error: unknown, url: string, imagePath: string): Error {
+    if (error instanceof Error) {
+      if (/^Ollama vision request failed/i.test(error.message)) {
+        return error;
+      }
+
+      return new Error(
+        `Ollama vision request failed for model "${this.options.model}" at ${url} while processing ${imagePath}: ${error.message}`
+      );
+    }
+
+    return new Error(
+      `Ollama vision request failed for model "${this.options.model}" at ${url} while processing ${imagePath}: ${String(error)}`
+    );
   }
 }

@@ -38,6 +38,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
     "When a screenshot tool returns an image path, Telegram will attach the image automatically. Do not say that you cannot upload files.",
     "Use keyboard_type, keyboard_hotkey, and mouse_click for direct desktop interaction.",
     "Use click_element when you can identify a visible UI element by text or description and want to click it directly.",
+    "There is no dedicated web search tool in this build. If the user wants something from the web, only attempt it through visible desktop/browser interaction you can actually inspect and control.",
     "Use clipboard_read and clipboard_write for clipboard tasks instead of shell workarounds.",
     "Use list_files, read_file, and search_files to inspect trusted local files and folders.",
     "Use write_file and replace_in_file for direct text file edits inside trusted roots instead of using the shell.",

@@ -103,4 +103,22 @@ describe("VisionClient", () => {
     expect(result.x).toBe(100);
     expect(result.height).toBe(20);
   });
+
+  it("wraps fetch failures with model and image context", async () => {
+    const imagePath = createTempImage();
+    const fetchImpl = vi.fn(async () => {
+      throw new Error("fetch failed");
+    });
+
+    const client = new VisionClient({
+      host: "http://127.0.0.1:11434",
+      model: "gemma4:latest",
+      logger: createLogger("error"),
+      fetchImpl: fetchImpl as typeof fetch
+    });
+
+    await expect(client.ocrRead(imagePath)).rejects.toThrow(
+      `Ollama vision request failed for model "gemma4:latest" at http://127.0.0.1:11434/api/chat while processing ${imagePath}: fetch failed`
+    );
+  });
 });

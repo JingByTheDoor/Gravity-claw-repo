@@ -108,9 +108,28 @@ function isIterationLimitQuestion(text: string): boolean {
   return /\b(safety limit|step limit|iteration limit|max iterations|like iterations)\b/i.test(text);
 }
 
+function isSimpleGreeting(text: string): boolean {
+  const normalized = text.trim().toLowerCase();
+  if (normalized.length === 0 || normalized.length > 48) {
+    return false;
+  }
+
+  return /^(?:hi|hello|hey|heya|yo|hiya|good morning|good afternoon|good evening|sup|what'?s up)[!.?]*$/i.test(
+    normalized
+  );
+}
+
 function isSimpleScreenshotRequest(text: string): boolean {
   const normalized = text.trim().toLowerCase();
   if (!/\b(screen ?shot|screenshot)\b/.test(normalized)) {
+    return false;
+  }
+
+  if (
+    /\b(online|internet|web|website|browser|google|bing|search|find|look up|image|photo|picture|pic|download|navigate|site|url)\b/.test(
+      normalized
+    )
+  ) {
     return false;
   }
 
@@ -444,6 +463,10 @@ export class AgentLoop {
 
   private tryDirectReply(chatId: string, userInput: string): string | undefined {
     const facts = this.options.memoryStore.listFacts(chatId);
+
+    if (isSimpleGreeting(userInput)) {
+      return "Hello! How can I assist you today?";
+    }
 
     if (isMemoryRecallQuestion(userInput)) {
       return formatFactsReply(facts);

@@ -78,3 +78,28 @@ describe("OllamaClient.checkHealth", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(3);
   });
 });
+
+describe("OllamaClient.runStep", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("wraps fetch failures with host and model context", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("fetch failed"));
+
+    const client = new OllamaClient({
+      host: "http://127.0.0.1:11434",
+      model: "gemma4:latest",
+      logger: createLogger("error")
+    });
+
+    await expect(
+      client.runStep({
+        messages: [{ role: "user", content: "hello" }],
+        tools: []
+      })
+    ).rejects.toThrow(
+      'Ollama chat request failed for model "gemma4:latest" at http://127.0.0.1:11434/api/chat: fetch failed'
+    );
+  });
+});

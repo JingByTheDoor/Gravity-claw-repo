@@ -44,7 +44,7 @@ describe("AgentLoop", () => {
       errorStore: new RuntimeErrorStore()
     });
 
-    await expect(loop.run("chat-1", "hello")).resolves.toEqual({
+    await expect(loop.run("chat-1", "tell me something useful")).resolves.toEqual({
       replyText: "Hello from local Ollama.",
       attachments: []
     });
@@ -286,6 +286,29 @@ describe("AgentLoop", () => {
     });
   });
 
+  it("answers simple greetings directly without waiting for the model", async () => {
+    const llmClient: LLMClient = {
+      checkHealth: vi.fn(async () => undefined),
+      runStep: vi.fn(async (): Promise<LLMRunResponse> => {
+        throw new Error("LLM should not run for direct greeting replies");
+      })
+    };
+
+    const loop = new AgentLoop({
+      llmClient,
+      toolRegistry: new ToolRegistry([createGetCurrentTimeTool()]),
+      memoryStore: createMemoryStoreStub(),
+      maxIterations: 4,
+      logger: createLogger("error"),
+      errorStore: new RuntimeErrorStore()
+    });
+
+    await expect(loop.run("chat-1", "hi")).resolves.toEqual({
+      replyText: "Hello! How can I assist you today?",
+      attachments: []
+    });
+  });
+
   it("stores obvious durable facts even without a tool call", async () => {
     const memoryStore = createMemoryStoreStub();
     const llmClient: LLMClient = {
@@ -469,6 +492,53 @@ describe("AgentLoop", () => {
       loop.run("chat-1", "open figma wait for it to load then take a full screen screenshot and describe it")
     ).resolves.toEqual({
       replyText: "Working on the full workflow.",
+      attachments: []
+    });
+
+    expect(llmClient.runStep).toHaveBeenCalledTimes(1);
+    expect(screenshotTool.execute).not.toHaveBeenCalled();
+  });
+
+  it("does not shortcut screenshot requests that also require finding something online", async () => {
+    const llmClient: LLMClient = {
+      checkHealth: vi.fn(async () => undefined),
+      runStep: vi.fn(async (): Promise<LLMRunResponse> => ({
+        message: {
+          role: "assistant",
+          content: "I'll handle the broader task instead of taking the current screen immediately."
+        }
+      }))
+    };
+
+    const screenshotTool = {
+      name: "take_screenshot",
+      description: "test screenshot",
+      parameters: {
+        type: "object" as const,
+        properties: {},
+        additionalProperties: false
+      },
+      execute: vi.fn(async () =>
+        JSON.stringify({
+          ok: true,
+          path: "C:\\temp\\wrong-shot.png"
+        })
+      )
+    };
+
+    const loop = new AgentLoop({
+      llmClient,
+      toolRegistry: new ToolRegistry([screenshotTool]),
+      memoryStore: createMemoryStoreStub(),
+      maxIterations: 4,
+      logger: createLogger("error"),
+      errorStore: new RuntimeErrorStore()
+    });
+
+    await expect(
+      loop.run("chat-1", "could you find an image of a zebra online and take a screenshot of it")
+    ).resolves.toEqual({
+      replyText: "I'll handle the broader task instead of taking the current screen immediately.",
       attachments: []
     });
 
