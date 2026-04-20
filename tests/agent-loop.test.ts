@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { AgentLoop, ITERATION_LIMIT_MESSAGE } from "../src/agent/loop.js";
+import { AgentLoop, CANCELED_MESSAGE, ITERATION_LIMIT_MESSAGE } from "../src/agent/loop.js";
 import { RuntimeErrorStore } from "../src/errors/runtime-error-store.js";
 import type { LLMRunResponse } from "../src/agent/types.js";
 import type { LLMClient } from "../src/llm/client.js";
@@ -556,5 +556,85 @@ describe("AgentLoop", () => {
             message.role === "user" && message.content === "Cleaned task for the stronger model"
         )
     ).toBe(true);
+  });
+
+  it("stops before calling the model when cancellation is already requested", async () => {
+    const llmClient: LLMClient = {
+      checkHealth: vi.fn(async () => undefined),
+      runStep: vi.fn(async (): Promise<LLMRunResponse> => {
+        throw new Error("LLM should not run after cancellation");
+      })
+    };
+
+    const loop = new AgentLoop({
+      llmClient,
+      toolRegistry: new ToolRegistry([createGetCurrentTimeTool()]),
+      memoryStore: createMemoryStoreStub(),
+      maxIterations: 4,
+      logger: createLogger("error"),
+      errorStore: new RuntimeErrorStore()
+    });
+
+    await expect(
+      loop.run("chat-1", "do something", {
+        shouldCancel: () => true
+      })
+    ).resolves.toEqual({
+      replyText: CANCELED_MESSAGE,
+      attachments: []
+    });
+    expect(llmClient.runStep).not.toHaveBeenCalled();
+  });
+
+  it("stops before executing a tool when cancellation arrives after the model step", async () => {
+    const llmClient: LLMClient = {
+      checkHealth: vi.fn(async () => undefined),
+      runStep: vi.fn(async (): Promise<LLMRunResponse> => ({
+        message: {
+          role: "assistant",
+          content: "",
+          toolCalls: [{ name: "get_current_time", arguments: { timezone: "UTC" } }]
+        }
+      }))
+    };
+    const toolExecute = vi.fn(async () =>
+      JSON.stringify({
+        ok: true,
+        timezone: "UTC"
+      })
+    );
+
+    const loop = new AgentLoop({
+      llmClient,
+      toolRegistry: new ToolRegistry([{
+        name: "get_current_time",
+        description: "test tool",
+        parameters: {
+          type: "object",
+          properties: {},
+          additionalProperties: false
+        },
+        execute: toolExecute
+      }]),
+      memoryStore: createMemoryStoreStub(),
+      maxIterations: 4,
+      logger: createLogger("error"),
+      errorStore: new RuntimeErrorStore()
+    });
+
+    let cancelCheckCount = 0;
+    await expect(
+      loop.run("chat-1", "do something", {
+        shouldCancel: () => {
+          cancelCheckCount += 1;
+          return cancelCheckCount >= 2;
+        }
+      })
+    ).resolves.toEqual({
+      replyText: CANCELED_MESSAGE,
+      attachments: []
+    });
+
+    expect(toolExecute).not.toHaveBeenCalled();
   });
 });

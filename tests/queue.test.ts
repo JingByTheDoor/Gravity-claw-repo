@@ -40,4 +40,17 @@ describe("ChatTaskQueue", () => {
     queue.endActiveRun("chat-1");
     expect(queue.isActiveRun("chat-1")).toBe(false);
   });
+
+  it("tracks and clears cancel requests per chat", () => {
+    const queue = new ChatTaskQueue();
+
+    expect(queue.requestCancel("chat-1")).toBe(false);
+
+    queue.beginActiveRun("chat-1");
+    expect(queue.requestCancel("chat-1")).toBe(true);
+    expect(queue.shouldCancel("chat-1")).toBe(true);
+
+    queue.endActiveRun("chat-1");
+    expect(queue.shouldCancel("chat-1")).toBe(false);
+  });
 });

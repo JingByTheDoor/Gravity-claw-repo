@@ -60,12 +60,23 @@ export interface ScreenshotOptions {
 
 export interface ScreenshotResult {
   ok: boolean;
-  mode: "full" | "region";
+  mode: "full" | "region" | "window";
   path: string;
   width: number;
   height: number;
   x: number;
   y: number;
+}
+
+export interface ActiveAppResult {
+  ok: boolean;
+  processName: string;
+  processId: number;
+  title: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 export interface KeyboardTypeResult {
@@ -84,6 +95,26 @@ export interface MouseClickResult {
   y: number;
   button: "left" | "right" | "middle";
   count: number;
+}
+
+export interface ClipboardReadResult {
+  ok: boolean;
+  text: string;
+}
+
+export interface ClipboardWriteResult {
+  ok: boolean;
+  textLength: number;
+}
+
+interface ActiveWindowInfo {
+  processName: string;
+  processId: number;
+  title: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 interface DesktopControllerOptions {
@@ -160,6 +191,10 @@ function clampPositiveInteger(value: number | undefined, fallback: number): numb
   }
 
   return Math.trunc(value);
+}
+
+function coalesceInteger(value: number | undefined, fallback: number): number {
+  return value === undefined ? fallback : Math.trunc(value);
 }
 
 function parseButton(value: unknown): "left" | "right" | "middle" {
@@ -401,15 +436,12 @@ $result | ConvertTo-Json -Compress
     }
 
     await fs.mkdir(this.artifactsDir, { recursive: true });
-    const outputPath = options.outputPath
-      ? path.resolve(options.outputPath)
-      : path.join(this.artifactsDir, `screenshot-${Date.now()}.png`);
-    await fs.mkdir(path.dirname(outputPath), { recursive: true });
+    const outputPath = await this.resolveScreenshotOutputPath(options.outputPath, "screenshot");
 
     const payload = createPayloadLiteral({
       mode,
-      x: clampPositiveInteger(parseIntegerLike(options.x), 0),
-      y: clampPositiveInteger(parseIntegerLike(options.y), 0),
+      x: coalesceInteger(parseIntegerLike(options.x), 0),
+      y: coalesceInteger(parseIntegerLike(options.y), 0),
       width: parseIntegerLike(options.width),
       height: parseIntegerLike(options.height),
       outputPath
@@ -437,6 +469,69 @@ $bitmap.Dispose()
 [ordered]@{
   ok = $true
   mode = $payload.mode
+  path = $payload.outputPath
+  width = $bounds.Width
+  height = $bounds.Height
+  x = $bounds.X
+  y = $bounds.Y
+} | ConvertTo-Json -Compress
+`);
+
+    return parseJsonResponse<ScreenshotResult>(stdout);
+  }
+
+  async getActiveApp(): Promise<ActiveAppResult> {
+    if (this.platform !== "win32") {
+      throw new Error("Active app inspection is currently supported on Windows only.");
+    }
+
+    const activeWindow = await this.getActiveWindowInfo();
+    return {
+      ok: true,
+      processName: activeWindow.processName,
+      processId: activeWindow.processId,
+      title: activeWindow.title,
+      x: activeWindow.x,
+      y: activeWindow.y,
+      width: activeWindow.width,
+      height: activeWindow.height
+    };
+  }
+
+  async takeActiveWindowScreenshot(outputPath?: string): Promise<ScreenshotResult> {
+    if (this.platform !== "win32") {
+      throw new Error("Active window screenshots are currently supported on Windows only.");
+    }
+
+    const activeWindow = await this.getActiveWindowInfo();
+    if (activeWindow.width <= 0 || activeWindow.height <= 0) {
+      throw new Error("The active window does not have a visible size.");
+    }
+
+    await fs.mkdir(this.artifactsDir, { recursive: true });
+    const resolvedOutputPath = await this.resolveScreenshotOutputPath(outputPath, "active-window");
+    const payload = createPayloadLiteral({
+      x: activeWindow.x,
+      y: activeWindow.y,
+      width: activeWindow.width,
+      height: activeWindow.height,
+      outputPath: resolvedOutputPath
+    });
+
+    const stdout = await this.runPowerShellImpl(`
+$payload = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${payload}')) | ConvertFrom-Json
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+$bounds = New-Object System.Drawing.Rectangle ([int]$payload.x), ([int]$payload.y), ([int]$payload.width), ([int]$payload.height)
+$bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
+$graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+$graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+$bitmap.Save($payload.outputPath, [System.Drawing.Imaging.ImageFormat]::Png)
+$graphics.Dispose()
+$bitmap.Dispose()
+[ordered]@{
+  ok = $true
+  mode = 'window'
   path = $payload.outputPath
   width = $bounds.Width
   height = $bounds.Height
@@ -569,6 +664,44 @@ Write-Output '{"ok":true}'
       y: Math.trunc(y),
       button,
       count: clickCount
+    };
+  }
+
+  async clipboardRead(): Promise<ClipboardReadResult> {
+    if (this.platform !== "win32") {
+      throw new Error("Clipboard reading is currently supported on Windows only.");
+    }
+
+    const stdout = await this.runPowerShellImpl(`
+try {
+  $text = Get-Clipboard -Raw -ErrorAction Stop
+} catch {
+  $text = ''
+}
+[ordered]@{
+  ok = $true
+  text = [string]$text
+} | ConvertTo-Json -Compress
+`);
+
+    return parseJsonResponse<ClipboardReadResult>(stdout);
+  }
+
+  async clipboardWrite(text: string): Promise<ClipboardWriteResult> {
+    if (this.platform !== "win32") {
+      throw new Error("Clipboard writing is currently supported on Windows only.");
+    }
+
+    const payload = createPayloadLiteral({ text });
+    await this.runPowerShellImpl(`
+$payload = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${payload}')) | ConvertFrom-Json
+Set-Clipboard -Value ([string]$payload.text)
+Write-Output '{"ok":true}'
+`);
+
+    return {
+      ok: true,
+      textLength: text.length
     };
   }
 
@@ -712,6 +845,65 @@ $apps | ConvertTo-Json -Compress
         mainWindowHandle
       }];
     });
+  }
+
+  private async getActiveWindowInfo(): Promise<ActiveWindowInfo> {
+    const stdout = await this.runPowerShellImpl(`
+Add-Type @"
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+public static class GravityClawActiveWindow {
+  [StructLayout(LayoutKind.Sequential)]
+  public struct RECT {
+    public int Left;
+    public int Top;
+    public int Right;
+    public int Bottom;
+  }
+
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
+  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+}
+"@
+$handle = [GravityClawActiveWindow]::GetForegroundWindow()
+if ($handle -eq [IntPtr]::Zero) {
+  throw 'No active window is available.'
+}
+$titleBuilder = New-Object System.Text.StringBuilder 1024
+[GravityClawActiveWindow]::GetWindowText($handle, $titleBuilder, $titleBuilder.Capacity) | Out-Null
+$rect = New-Object GravityClawActiveWindow+RECT
+if (-not [GravityClawActiveWindow]::GetWindowRect($handle, [ref]$rect)) {
+  throw 'Could not read the active window bounds.'
+}
+[uint32]$processId = 0
+[GravityClawActiveWindow]::GetWindowThreadProcessId($handle, [ref]$processId) | Out-Null
+$process = Get-Process -Id ([int]$processId) -ErrorAction Stop
+[ordered]@{
+  processName = $process.ProcessName
+  processId = $process.Id
+  title = $titleBuilder.ToString()
+  x = $rect.Left
+  y = $rect.Top
+  width = $rect.Right - $rect.Left
+  height = $rect.Bottom - $rect.Top
+} | ConvertTo-Json -Compress
+`);
+
+    return parseJsonResponse<ActiveWindowInfo>(stdout);
+  }
+
+  private async resolveScreenshotOutputPath(
+    outputPath: string | undefined,
+    prefix: string
+  ): Promise<string> {
+    const resolvedPath = outputPath
+      ? path.resolve(outputPath)
+      : path.join(this.artifactsDir, `${prefix}-${Date.now()}.png`);
+    await fs.mkdir(path.dirname(resolvedPath), { recursive: true });
+    return resolvedPath;
   }
 
   private async runPowerShell(command: string): Promise<string> {

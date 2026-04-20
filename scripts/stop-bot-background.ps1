@@ -4,6 +4,7 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $runtimeDir = Join-Path $repoRoot ".runtime"
 $supervisorPidFile = Join-Path $runtimeDir "bot-supervisor.pid"
 $pidFile = Join-Path $runtimeDir "bot.pid"
+$runMetadataFile = Join-Path $runtimeDir "bot-run.json"
 
 function Get-TrackedProcess {
   param(
@@ -64,3 +65,5 @@ if ($null -ne $botProcess) {
   Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
   Write-Output "Stopped bot process. PID: $($botProcess.Id)"
 }
+
+Remove-Item $runMetadataFile -Force -ErrorAction SilentlyContinue

@@ -9,9 +9,8 @@ $runtimeDir = Join-Path $repoRoot ".runtime"
 $logsDir = Join-Path $repoRoot "logs"
 $supervisorPidFile = Join-Path $runtimeDir "bot-supervisor.pid"
 $pidFile = Join-Path $runtimeDir "bot.pid"
+$runMetadataFile = Join-Path $runtimeDir "bot-run.json"
 $supervisorLog = Join-Path $logsDir "bot-supervisor.log"
-$stdoutLog = Join-Path $logsDir "bot.out.log"
-$stderrLog = Join-Path $logsDir "bot.err.log"
 $supervisorScript = Join-Path $repoRoot "scripts\bot-supervisor.ps1"
 
 function Get-TrackedProcess {
@@ -57,19 +56,37 @@ function Get-TrackedBotProcess {
   return Get-TrackedProcess -PidFile $pidFile -CommandPattern "dist/src/index.js"
 }
 
+function Get-RunMetadata {
+  if (-not (Test-Path $runMetadataFile)) {
+    return $null
+  }
+
+  try {
+    return Get-Content $runMetadataFile -Raw | ConvertFrom-Json
+  } catch {
+    return $null
+  }
+}
+
 New-Item -ItemType Directory -Path $runtimeDir -Force | Out-Null
 New-Item -ItemType Directory -Path $logsDir -Force | Out-Null
 
 $existingSupervisor = Get-TrackedSupervisorProcess
 if ($null -ne $existingSupervisor) {
   $existingBot = Get-TrackedBotProcess
+  $runMetadata = Get-RunMetadata
   if ($null -ne $existingBot) {
     Write-Output "Gravity Claw bot supervisor is already running. Supervisor PID: $($existingSupervisor.Id), bot PID: $($existingBot.Id)"
   } else {
     Write-Output "Gravity Claw bot supervisor is already running. Supervisor PID: $($existingSupervisor.Id)"
   }
 
-  Write-Output "Logs: $stdoutLog and $stderrLog"
+  if ($null -ne $runMetadata) {
+    Write-Output "Current bot stdout log: $($runMetadata.stdoutLog)"
+    Write-Output "Current bot stderr log: $($runMetadata.stderrLog)"
+  } else {
+    Write-Output "Current bot run logs are not available yet."
+  }
   Write-Output "Supervisor log: $supervisorLog"
   exit 0
 }
@@ -104,6 +121,12 @@ if ($null -eq $runningSupervisor) {
 }
 
 Write-Output "Gravity Claw bot supervisor started in the background. Supervisor PID: $($runningSupervisor.Id)"
-Write-Output "Logs: $stdoutLog and $stderrLog"
+$runMetadata = Get-RunMetadata
+if ($null -ne $runMetadata) {
+  Write-Output "Current bot stdout log: $($runMetadata.stdoutLog)"
+  Write-Output "Current bot stderr log: $($runMetadata.stderrLog)"
+} else {
+  Write-Output "Current bot run logs are not available yet."
+}
 Write-Output "Supervisor log: $supervisorLog"
 Write-Output "The supervisor rebuilds and restarts the bot automatically when watched files change."

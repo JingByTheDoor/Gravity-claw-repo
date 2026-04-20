@@ -3,10 +3,14 @@ import { ApprovalStore } from "../approvals/store.js";
 import type { Logger } from "../logging/logger.js";
 import { MemoryStore } from "../memory/store.js";
 import { AppLauncher } from "./app-launcher.js";
+import { createClipboardReadTool } from "./clipboard-read.js";
+import { createClipboardWriteTool } from "./clipboard-write.js";
+import { createClickElementTool } from "./click-element.js";
 import { createCloseAppTool } from "./close-app.js";
 import { DesktopController } from "./desktop-controller.js";
 import { createFindElementTool } from "./find-element.js";
 import { createFocusAppTool } from "./focus-app.js";
+import { createGetActiveAppTool } from "./get-active-app.js";
 import { createGetCurrentTimeTool } from "./get-current-time.js";
 import { createKeyboardHotkeyTool } from "./keyboard-hotkey.js";
 import { createKeyboardTypeTool } from "./keyboard-type.js";
@@ -18,11 +22,14 @@ import { createOcrReadTool } from "./ocr-read.js";
 import { createReadFileTool } from "./read-file.js";
 import { createRecallMemoryTool } from "./recall-memory.js";
 import { createRememberFactTool } from "./remember-fact.js";
+import { createReplaceInFileTool } from "./replace-in-file.js";
 import { createRunShellCommandTool } from "./run-shell-command.js";
 import { createSearchFilesTool } from "./search-files.js";
+import { createTakeActiveWindowScreenshotTool } from "./take-active-window-screenshot.js";
 import { createTakeScreenshotTool } from "./take-screenshot.js";
 import { VisionClient } from "./vision-client.js";
 import { createWaitForElementTool } from "./wait-for-element.js";
+import { createWriteFileTool } from "./write-file.js";
 import { ShellRunner } from "./shell-runner.js";
 import type { PathAccessPolicy } from "./workspace.js";
 
@@ -84,16 +91,23 @@ export function createDefaultToolRegistry(options: CreateDefaultToolRegistryOpti
     createListAppsTool(options.desktopController),
     createFocusAppTool(options.desktopController),
     createCloseAppTool(options.desktopController),
+    createGetActiveAppTool(options.desktopController),
     createTakeScreenshotTool(options.desktopController),
+    createTakeActiveWindowScreenshotTool(options.desktopController),
     createOcrReadTool(options.desktopController, options.visionClient),
     createKeyboardHotkeyTool(options.desktopController),
     createKeyboardTypeTool(options.desktopController),
     createMouseClickTool(options.desktopController),
     createFindElementTool(options.desktopController, options.visionClient),
     createWaitForElementTool(options.desktopController, options.visionClient),
+    createClickElementTool(options.desktopController, options.visionClient),
+    createClipboardReadTool(options.desktopController),
+    createClipboardWriteTool(options.desktopController),
     createListFilesTool(options.pathAccessPolicy),
     createReadFileTool(options.pathAccessPolicy),
     createSearchFilesTool(options.pathAccessPolicy),
+    createWriteFileTool(options.pathAccessPolicy),
+    createReplaceInFileTool(options.pathAccessPolicy),
     createRunShellCommandTool(
       options.pathAccessPolicy,
       options.approvalStore,

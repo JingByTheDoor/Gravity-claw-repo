@@ -74,6 +74,21 @@ export class VisionClient {
     this.fetchImpl = options.fetchImpl ?? fetch;
   }
 
+  async checkHealth(): Promise<void> {
+    const response = await this.fetchImpl(this.buildUrl("/api/tags"));
+    if (!response.ok) {
+      throw new Error(`Ollama vision health check failed with status ${response.status}`);
+    }
+
+    const payload = (await response.json()) as { models?: Array<{ name?: string }> };
+    const modelNames = new Set(
+      (payload.models ?? []).flatMap((model) => (model.name ? [model.name] : []))
+    );
+    if (!modelNames.has(this.options.model)) {
+      throw new Error(`Configured Ollama vision model "${this.options.model}" is not available locally.`);
+    }
+  }
+
   async ocrRead(imagePath: string): Promise<OcrReadResult> {
     const payload = await this.runVisionJson(imagePath, [
       "Read all visible text from this screenshot.",

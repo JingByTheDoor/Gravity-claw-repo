@@ -1,6 +1,7 @@
 export interface AgentRunOptions {
   onProgress?: (message: string) => Promise<void> | void;
   consumeSteeringMessages?: () => Promise<string[]> | string[];
+  shouldCancel?: () => boolean | Promise<boolean>;
 }
 
 export const PLANNING_PROGRESS_MESSAGE = "Status: planning the next step";
@@ -9,6 +10,8 @@ export const ITERATION_LIMIT_PROGRESS_MESSAGE =
   "Status: reached the local step limit before finishing";
 export const LOCAL_ERROR_PROGRESS_MESSAGE = "Status: hit a local error while working";
 export const STEERING_PROGRESS_MESSAGE = "Status: updating the plan with your latest guidance";
+export const CANCELLATION_PROGRESS_MESSAGE =
+  "Status: cancellation requested; stopping after the current step";
 
 function clipText(value: string, maxLength: number): string {
   const normalized = value.replace(/\s+/g, " ").trim();
@@ -101,6 +104,8 @@ export function formatToolStartProgressMessage(
         : "Status: checking running apps";
     case "take_screenshot":
       return "Status: taking a screenshot";
+    case "take_active_window_screenshot":
+      return "Status: taking a screenshot of the active window";
     case "ocr_read":
       return "Status: reading text from the screen";
     case "find_element":
@@ -111,6 +116,12 @@ export function formatToolStartProgressMessage(
       return query
         ? `Status: waiting for ${quoteValue(query, 60)} to appear`
         : "Status: waiting for an element to appear";
+    case "click_element":
+      return query
+        ? `Status: clicking ${quoteValue(query, 60)}`
+        : "Status: clicking a visible element";
+    case "get_active_app":
+      return "Status: checking the active app";
     case "keyboard_hotkey":
       return keys
         ? `Status: sending ${quoteValue(keys, 40)}`
@@ -131,6 +142,18 @@ export function formatToolStartProgressMessage(
       return query
         ? `Status: searching files for ${quoteValue(query, 60)}`
         : "Status: searching files";
+    case "write_file":
+      return path
+        ? `Status: writing ${quoteValue(path, 70)}`
+        : "Status: writing a file";
+    case "replace_in_file":
+      return path
+        ? `Status: editing ${quoteValue(path, 70)}`
+        : "Status: editing a file";
+    case "clipboard_read":
+      return "Status: reading the clipboard";
+    case "clipboard_write":
+      return "Status: updating the clipboard";
     case "run_shell_command":
       return "Status: running a local shell command";
     case "get_current_time":
@@ -185,6 +208,10 @@ export function formatToolFinishedProgressMessage(
       return "Status: checked the app list";
     case "take_screenshot":
       return ok ? "Status: captured a screenshot" : "Status: could not capture the screenshot";
+    case "take_active_window_screenshot":
+      return ok
+        ? "Status: captured the active window"
+        : "Status: could not capture the active window";
     case "ocr_read":
       return ok
         ? "Status: read the text from the screen"
@@ -215,6 +242,21 @@ export function formatToolFinishedProgressMessage(
         ? `Status: timed out waiting for ${quoteValue(inputQuery, 60)}`
         : "Status: timed out waiting for the element";
     }
+    case "click_element": {
+      const found = readBoolean(result, "found");
+      const label = readString(result, "label") ?? inputQuery;
+      if (found) {
+        return label
+          ? `Status: clicked ${quoteValue(label, 60)}`
+          : "Status: clicked the element";
+      }
+
+      return inputQuery
+        ? `Status: could not click ${quoteValue(inputQuery, 60)}`
+        : "Status: could not click the element";
+    }
+    case "get_active_app":
+      return ok ? "Status: checked the active app" : "Status: could not check the active app";
     case "keyboard_hotkey":
       return ok ? "Status: sent the keyboard shortcut" : "Status: could not send the keyboard shortcut";
     case "keyboard_type":
@@ -250,6 +292,30 @@ export function formatToolFinishedProgressMessage(
         ? `Status: finished searching files for ${quoteValue(query, 60)}`
         : "Status: finished searching files";
     }
+    case "write_file": {
+      const path = readString(result, "path") ?? inputPath;
+      return ok
+        ? path
+          ? `Status: wrote ${quoteValue(path, 70)}`
+          : "Status: wrote the file"
+        : path
+          ? `Status: could not write ${quoteValue(path, 70)}`
+          : "Status: could not write the file";
+    }
+    case "replace_in_file": {
+      const path = readString(result, "path") ?? inputPath;
+      return ok
+        ? path
+          ? `Status: updated ${quoteValue(path, 70)}`
+          : "Status: updated the file"
+        : path
+          ? `Status: could not update ${quoteValue(path, 70)}`
+          : "Status: could not update the file";
+    }
+    case "clipboard_read":
+      return ok ? "Status: read the clipboard" : "Status: could not read the clipboard";
+    case "clipboard_write":
+      return ok ? "Status: updated the clipboard" : "Status: could not update the clipboard";
     case "run_shell_command":
       if (readBoolean(result, "approvalRequired")) {
         return "Status: a shell command needs approval";

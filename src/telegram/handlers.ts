@@ -3,7 +3,8 @@ import { InputFile } from "grammy";
 import type { AgentRunResult } from "../agent/loop.js";
 import type { AgentRunOptions } from "../agent/progress.js";
 import type { ChatTaskQueue } from "../agent/queue.js";
-import type { ApprovalStore } from "../approvals/store.js";
+import type { ApprovalStore, PendingApproval } from "../approvals/store.js";
+import type { StatusService, StatusSnapshot } from "../app/status-service.js";
 import type { RuntimeErrorStore } from "../errors/runtime-error-store.js";
 import type { Logger } from "../logging/logger.js";
 import type { MemoryStoreLike } from "../memory/store.js";
@@ -16,9 +17,42 @@ export const NEW_CHAT_MESSAGE =
   "Started a new chat. I kept your durable memory facts and cleared recent conversation history.";
 export const LIVE_STEERING_MESSAGE =
   "Noted. I'll treat this as guidance for the task that's already running.";
+export const HELP_MESSAGE = [
+  "Gravity Claw commands:",
+  "/new - clear recent conversation history but keep durable memory",
+  "/status - show local bot, model, and workspace status",
+  "/approvals - list pending shell approvals for this chat",
+  "/approve <id> - approve a pending shell command",
+  "/deny <id> - deny a pending shell command",
+  "/last_error - show the latest stored local error",
+  "/cancel - request cancellation for the current task",
+  "",
+  "Example prompts:",
+  "- open Telegram and focus it",
+  "- take a screenshot of the active window",
+  "- click the Save button on screen",
+  "- read notes/todo.txt",
+  "- replace TODO with DONE in notes/todo.txt",
+  "- copy this summary to the clipboard"
+].join("\n");
+export const CANCEL_REQUESTED_MESSAGE =
+  "Cancellation requested. I'll stop after the current local step finishes.";
+export const NO_ACTIVE_TASK_TO_CANCEL_MESSAGE = "No active task is running in this chat.";
+
+function isHelpCommand(text: string): boolean {
+  return /^\/help(?:@[\w_]+)?(?:\s|$)/i.test(text.trim());
+}
 
 function isNewCommand(text: string): boolean {
   return /^\/new(?:@[\w_]+)?(?:\s|$)/i.test(text.trim());
+}
+
+function isStatusCommand(text: string): boolean {
+  return /^\/status(?:@[\w_]+)?(?:\s|$)/i.test(text.trim());
+}
+
+function isApprovalsCommand(text: string): boolean {
+  return /^\/approvals(?:@[\w_]+)?(?:\s|$)/i.test(text.trim());
 }
 
 function isApproveCommand(text: string): boolean {
@@ -27,6 +61,10 @@ function isApproveCommand(text: string): boolean {
 
 function isDenyCommand(text: string): boolean {
   return /^\/deny(?:@[\w_]+)?(?:\s|$)/i.test(text.trim());
+}
+
+function isCancelCommand(text: string): boolean {
+  return /^\/cancel(?:@[\w_]+)?(?:\s|$)/i.test(text.trim());
 }
 
 function isLastErrorCommand(text: string): boolean {
@@ -60,6 +98,50 @@ interface CommandContext {
   from?: { id: number } | undefined;
   chat?: { id: number | string | bigint } | undefined;
   reply(text: string): Promise<unknown>;
+}
+
+function truncateText(value: string, maxLength = 80): string {
+  return value.length <= maxLength ? value : `${value.slice(0, Math.max(maxLength - 1, 1))}...`;
+}
+
+function formatApprovalLine(
+  approval: PendingApproval,
+  pathAccessPolicy: PathAccessPolicy
+): string {
+  return [
+    `- ${approval.id}`,
+    `  cwd: ${describeAccessiblePath(pathAccessPolicy, approval.cwd)}`,
+    `  time: ${approval.createdAt}`,
+    `  command: ${truncateText(approval.command, 100)}`
+  ].join("\n");
+}
+
+function formatStatusReply(snapshot: StatusSnapshot): string {
+  const lines = [
+    `Bot: ${snapshot.bot ? `@${snapshot.bot.username || "unknown"} (${snapshot.bot.id})` : "starting up"}`,
+    `Ollama host: ${snapshot.ollamaHost}`,
+    `Ollama reachable: ${snapshot.ollamaReachable ? "yes" : "no"}`,
+    `Chat model: ${snapshot.ollamaModel} (${snapshot.chatModelAvailable ? "available" : "missing"})`,
+    `Fast model: ${snapshot.ollamaFastModel} (${snapshot.fastModelAvailable ? "available" : "missing"})`,
+    `Vision model: ${snapshot.ollamaVisionModel} (${snapshot.visionModelAvailable ? "available" : "missing"})`,
+    `Fast routing: ${snapshot.fastRoutingEnabled ? "enabled" : "disabled"}`,
+    `Database path: ${snapshot.databasePath}`,
+    `Workspace root: ${snapshot.workspaceRoot}`,
+    `Allowed roots: ${snapshot.allowedRoots.join(", ")}`,
+    `Pending approvals in this chat: ${snapshot.pendingApprovalCount}`
+  ];
+
+  if (snapshot.latestLocalErrorAt && snapshot.latestLocalErrorScope) {
+    lines.push(`Last local error: ${snapshot.latestLocalErrorAt} (${snapshot.latestLocalErrorScope})`);
+  } else {
+    lines.push("Last local error: none stored for this chat");
+  }
+
+  if (snapshot.error) {
+    lines.push(`Status warning: ${snapshot.error}`);
+  }
+
+  return lines.join("\n");
 }
 
 interface MessageHandlerDependencies {
@@ -117,9 +199,13 @@ export function createMessageHandler(dependencies: MessageHandlerDependencies) {
       typeof context.message?.text === "string" &&
       context.message.text.trim().length > 0 &&
       !isNewCommand(context.message.text) &&
+      !isHelpCommand(context.message.text) &&
+      !isStatusCommand(context.message.text) &&
+      !isApprovalsCommand(context.message.text) &&
       !isLastErrorCommand(context.message.text) &&
       !isApproveCommand(context.message.text) &&
       !isDenyCommand(context.message.text) &&
+      !isCancelCommand(context.message.text) &&
       dependencies.queue.captureSteeringMessage(chatId, context.message.text)
     ) {
       dependencies.logger.info("telegram.message.steering_received", {
@@ -138,9 +224,13 @@ export function createMessageHandler(dependencies: MessageHandlerDependencies) {
 
       if (
         isNewCommand(context.message.text) ||
+        isHelpCommand(context.message.text) ||
+        isStatusCommand(context.message.text) ||
+        isApprovalsCommand(context.message.text) ||
         isLastErrorCommand(context.message.text) ||
         isApproveCommand(context.message.text) ||
-        isDenyCommand(context.message.text)
+        isDenyCommand(context.message.text) ||
+        isCancelCommand(context.message.text)
       ) {
         return;
       }
@@ -170,7 +260,8 @@ export function createMessageHandler(dependencies: MessageHandlerDependencies) {
             });
           }
         },
-        consumeSteeringMessages: () => dependencies.queue.consumeSteeringMessages(chatId)
+        consumeSteeringMessages: () => dependencies.queue.consumeSteeringMessages(chatId),
+        shouldCancel: () => dependencies.queue.shouldCancel(chatId)
       };
       dependencies.queue.beginActiveRun(chatId);
       let agentResult!: AgentRunResult;
@@ -234,6 +325,52 @@ interface LastErrorCommandDependencies {
   errorStore: RuntimeErrorStore;
   queue: ChatTaskQueue;
   logger: Logger;
+}
+
+interface ApprovalsCommandDependencies {
+  allowedUserId: string;
+  approvalStore: ApprovalStore;
+  pathAccessPolicy: PathAccessPolicy;
+  queue: ChatTaskQueue;
+  logger: Logger;
+}
+
+interface StatusCommandDependencies {
+  allowedUserId: string;
+  statusService: StatusService;
+  queue: ChatTaskQueue;
+  logger: Logger;
+}
+
+interface CancelCommandDependencies {
+  allowedUserId: string;
+  queue: ChatTaskQueue;
+  logger: Logger;
+}
+
+export function createHelpCommandHandler(dependencies: {
+  allowedUserId: string;
+  queue: ChatTaskQueue;
+  logger: Logger;
+}) {
+  return async (context: CommandContext): Promise<void> => {
+    if (!context.from || !isAuthorizedUser(context.from.id, dependencies.allowedUserId)) {
+      return;
+    }
+
+    if (!context.chat) {
+      return;
+    }
+
+    const chatId = String(context.chat.id);
+    await dependencies.queue.run(chatId, async () => {
+      dependencies.logger.info("telegram.command.help", {
+        chatId,
+        userId: String(context.from?.id)
+      });
+      await context.reply(HELP_MESSAGE);
+    });
+  };
 }
 
 export function createApproveCommandHandler(dependencies: ApprovalCommandDependencies) {
@@ -312,6 +449,39 @@ export function createDenyCommandHandler(dependencies: ApprovalCommandDependenci
   };
 }
 
+export function createApprovalsCommandHandler(dependencies: ApprovalsCommandDependencies) {
+  return async (context: CommandContext): Promise<void> => {
+    if (!context.from || !isAuthorizedUser(context.from.id, dependencies.allowedUserId)) {
+      return;
+    }
+
+    if (!context.chat) {
+      return;
+    }
+
+    const chatId = String(context.chat.id);
+    await dependencies.queue.run(chatId, async () => {
+      const approvals = dependencies.approvalStore.listPending(chatId);
+      dependencies.logger.info("telegram.command.approvals", {
+        chatId,
+        count: approvals.length
+      });
+
+      if (approvals.length === 0) {
+        await context.reply("No pending approvals for this chat.");
+        return;
+      }
+
+      const lines = [
+        `Pending approvals for this chat: ${approvals.length}`,
+        approvals.map((approval) => formatApprovalLine(approval, dependencies.pathAccessPolicy)).join("\n")
+      ];
+
+      await context.reply(lines.join("\n"));
+    });
+  };
+}
+
 export function createLastErrorCommandHandler(dependencies: LastErrorCommandDependencies) {
   return async (context: CommandContext): Promise<void> => {
     if (!context.from || !isAuthorizedUser(context.from.id, dependencies.allowedUserId)) {
@@ -339,5 +509,50 @@ export function createLastErrorCommandHandler(dependencies: LastErrorCommandDepe
         `Last local error:\nscope: ${errorEntry.scope}\ntime: ${errorEntry.createdAt}\nmessage: ${errorEntry.message}`
       );
     });
+  };
+}
+
+export function createStatusCommandHandler(dependencies: StatusCommandDependencies) {
+  return async (context: CommandContext): Promise<void> => {
+    if (!context.from || !isAuthorizedUser(context.from.id, dependencies.allowedUserId)) {
+      return;
+    }
+
+    if (!context.chat) {
+      return;
+    }
+
+    const chatId = String(context.chat.id);
+    await dependencies.queue.run(chatId, async () => {
+      dependencies.logger.info("telegram.command.status", {
+        chatId,
+        userId: String(context.from?.id)
+      });
+
+      const status = await dependencies.statusService.getStatus(chatId);
+      await context.reply(formatStatusReply(status));
+    });
+  };
+}
+
+export function createCancelCommandHandler(dependencies: CancelCommandDependencies) {
+  return async (context: CommandContext): Promise<void> => {
+    if (!context.from || !isAuthorizedUser(context.from.id, dependencies.allowedUserId)) {
+      return;
+    }
+
+    if (!context.chat) {
+      return;
+    }
+
+    const chatId = String(context.chat.id);
+    const canceled = dependencies.queue.requestCancel(chatId);
+
+    dependencies.logger.info("telegram.command.cancel", {
+      chatId,
+      canceled
+    });
+
+    await context.reply(canceled ? CANCEL_REQUESTED_MESSAGE : NO_ACTIVE_TASK_TO_CANCEL_MESSAGE);
   };
 }

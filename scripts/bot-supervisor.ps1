@@ -8,11 +8,11 @@ $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $runtimeDir = Join-Path $repoRoot ".runtime"
 $logsDir = Join-Path $repoRoot "logs"
+$runLogsDir = Join-Path $logsDir "runs"
 $supervisorPidFile = Join-Path $runtimeDir "bot-supervisor.pid"
 $botPidFile = Join-Path $runtimeDir "bot.pid"
+$runMetadataFile = Join-Path $runtimeDir "bot-run.json"
 $supervisorLog = Join-Path $logsDir "bot-supervisor.log"
-$stdoutLog = Join-Path $logsDir "bot.out.log"
-$stderrLog = Join-Path $logsDir "bot.err.log"
 $entryScript = Join-Path $repoRoot "dist\src\index.js"
 $envFile = Join-Path $repoRoot ".env"
 $nodeCommand = Get-Command node -ErrorAction Stop
@@ -24,6 +24,7 @@ if ($null -eq $npmCommand) {
 
 New-Item -ItemType Directory -Path $runtimeDir -Force | Out-Null
 New-Item -ItemType Directory -Path $logsDir -Force | Out-Null
+New-Item -ItemType Directory -Path $runLogsDir -Force | Out-Null
 
 function Write-SupervisorLog {
   param(
@@ -33,6 +34,26 @@ function Write-SupervisorLog {
 
   $timestamp = [DateTime]::UtcNow.ToString("o")
   Add-Content -Path $supervisorLog -Value "$timestamp [$($Level.ToUpperInvariant())] $Message"
+}
+
+function Write-RunMetadata {
+  param(
+    [int]$ProcessId,
+    [string]$StdoutLog,
+    [string]$StderrLog
+  )
+
+  $payload = [ordered]@{
+    processId = $ProcessId
+    stdoutLog = $StdoutLog
+    stderrLog = $StderrLog
+    updatedAt = [DateTime]::UtcNow.ToString("o")
+  }
+  $payload | ConvertTo-Json -Compress | Set-Content -Path $runMetadataFile -Encoding UTF8
+}
+
+function Clear-RunMetadata {
+  Remove-Item $runMetadataFile -Force -ErrorAction SilentlyContinue
 }
 
 function Get-TrackedProcess {
@@ -112,11 +133,13 @@ function Stop-BotProcess {
   $process = Get-BotProcess
   if ($null -eq $process) {
     Remove-Item $botPidFile -Force -ErrorAction SilentlyContinue
+    Clear-RunMetadata
     return
   }
 
   Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
   Remove-Item $botPidFile -Force -ErrorAction SilentlyContinue
+  Clear-RunMetadata
   Write-SupervisorLog "Stopped bot process. PID: $($process.Id)"
 }
 
@@ -129,33 +152,53 @@ function Start-BotProcess {
     throw "Missing build output at $entryScript"
   }
 
-  Set-Content -Path $stdoutLog -Value ""
-  Set-Content -Path $stderrLog -Value ""
+  $lastErrorMessage = $null
 
-  $process = Start-Process `
-    -FilePath $nodeCommand.Path `
-    -ArgumentList @("dist/src/index.js") `
-    -WorkingDirectory $repoRoot `
-    -RedirectStandardOutput $stdoutLog `
-    -RedirectStandardError $stderrLog `
-    -WindowStyle Hidden `
-    -PassThru
+  foreach ($attempt in 1..3) {
+    $timestamp = [DateTime]::UtcNow.ToString("yyyyMMddTHHmmssfffZ")
+    $suffix = Get-Random -Minimum 1000 -Maximum 9999
+    $stdoutLog = Join-Path $runLogsDir "bot-$timestamp-$suffix.out.log"
+    $stderrLog = Join-Path $runLogsDir "bot-$timestamp-$suffix.err.log"
 
-  Set-Content -Path $botPidFile -Value $process.Id
-  Start-Sleep -Seconds 2
+    try {
+      $process = Start-Process `
+        -FilePath $nodeCommand.Path `
+        -ArgumentList @("dist/src/index.js") `
+        -WorkingDirectory $repoRoot `
+        -RedirectStandardOutput $stdoutLog `
+        -RedirectStandardError $stderrLog `
+        -WindowStyle Hidden `
+        -PassThru
 
-  $runningProcess = Get-Process -Id $process.Id -ErrorAction SilentlyContinue
-  if ($null -eq $runningProcess) {
-    Remove-Item $botPidFile -Force -ErrorAction SilentlyContinue
-    $errorTail = ""
-    if (Test-Path $stderrLog) {
-      $errorTail = ((Get-Content $stderrLog -Tail 20) -join [Environment]::NewLine).Trim()
+      Set-Content -Path $botPidFile -Value $process.Id
+      Start-Sleep -Seconds 2
+
+      $runningProcess = Get-Process -Id $process.Id -ErrorAction SilentlyContinue
+      if ($null -eq $runningProcess) {
+        Remove-Item $botPidFile -Force -ErrorAction SilentlyContinue
+        $errorTail = ""
+        if (Test-Path $stderrLog) {
+          $errorTail = ((Get-Content $stderrLog -Tail 20) -join [Environment]::NewLine).Trim()
+        }
+
+        throw "Bot exited during startup. $errorTail"
+      }
+
+      Write-RunMetadata -ProcessId $process.Id -StdoutLog $stdoutLog -StderrLog $stderrLog
+      Write-SupervisorLog "Started bot process. PID: $($process.Id). stdout: $stdoutLog stderr: $stderrLog"
+      return
+    } catch {
+      $lastErrorMessage = $_.Exception.Message
+      Remove-Item $botPidFile -Force -ErrorAction SilentlyContinue
+      Clear-RunMetadata
+      Write-SupervisorLog "Bot start attempt $attempt failed: $lastErrorMessage" "warn"
+      if ($attempt -lt 3) {
+        Start-Sleep -Milliseconds (250 * $attempt)
+      }
     }
-
-    throw "Bot exited during startup. $errorTail"
   }
 
-  Write-SupervisorLog "Started bot process. PID: $($process.Id)"
+  throw $lastErrorMessage
 }
 
 function Invoke-NpmBuild {

@@ -21,6 +21,28 @@ afterEach(() => {
 });
 
 describe("VisionClient", () => {
+  it("verifies that the configured vision model exists locally", async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(JSON.stringify({
+        models: [{ name: "gemma4:latest" }]
+      }), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json"
+        }
+      })
+    );
+
+    const client = new VisionClient({
+      host: "http://127.0.0.1:11434",
+      model: "gemma4:latest",
+      logger: createLogger("error"),
+      fetchImpl: fetchImpl as typeof fetch
+    });
+
+    await expect(client.checkHealth()).resolves.toBeUndefined();
+  });
+
   it("parses OCR responses from Ollama vision", async () => {
     const imagePath = createTempImage();
     const fetchImpl = vi.fn(async () =>

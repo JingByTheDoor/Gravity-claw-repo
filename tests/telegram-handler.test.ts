@@ -4,12 +4,19 @@ import { ApprovalStore } from "../src/approvals/store.js";
 import { RuntimeErrorStore } from "../src/errors/runtime-error-store.js";
 import { createLogger } from "../src/logging/logger.js";
 import {
+  createApprovalsCommandHandler,
   createApproveCommandHandler,
+  createCancelCommandHandler,
   createDenyCommandHandler,
+  createHelpCommandHandler,
+  HELP_MESSAGE,
   createLastErrorCommandHandler,
+  NO_ACTIVE_TASK_TO_CANCEL_MESSAGE,
+  CANCEL_REQUESTED_MESSAGE,
   LIVE_STEERING_MESSAGE,
   createMessageHandler,
   createNewCommandHandler,
+  createStatusCommandHandler,
   NEW_CHAT_MESSAGE,
   TEXT_ONLY_MESSAGE
 } from "../src/telegram/handlers.js";
@@ -263,6 +270,83 @@ describe("Telegram message handler", () => {
     expect(reply).toHaveBeenCalledWith(NEW_CHAT_MESSAGE);
   });
 
+  it("shows help text through /help", async () => {
+    const handler = createHelpCommandHandler({
+      allowedUserId: "123",
+      queue: new ChatTaskQueue(),
+      logger: createLogger("error")
+    });
+
+    const reply = vi.fn(async () => undefined);
+    await handler({
+      from: { id: 123 },
+      chat: { id: 77 },
+      reply
+    });
+
+    expect(reply).toHaveBeenCalledWith(HELP_MESSAGE);
+  });
+
+  it("shows status details through /status", async () => {
+    const handler = createStatusCommandHandler({
+      allowedUserId: "123",
+      statusService: {
+        getStatus: vi.fn(async () => ({
+          bot: { id: 42, username: "gravity_claw_bot" },
+          ollamaReachable: true,
+          chatModelAvailable: true,
+          fastModelAvailable: true,
+          visionModelAvailable: true,
+          databasePath: "gravity-claw.db",
+          workspaceRoot: "C:/workspace",
+          allowedRoots: ["C:/workspace"],
+          ollamaHost: "http://127.0.0.1:11434",
+          ollamaModel: "qwen2.5:3b",
+          ollamaFastModel: "qwen2.5:1.5b",
+          ollamaVisionModel: "gemma4:latest",
+          fastRoutingEnabled: true,
+          pendingApprovalCount: 1,
+          latestLocalErrorAt: "2026-04-20T02:31:56.000Z",
+          latestLocalErrorScope: "agent.run"
+        }))
+      } as never,
+      queue: new ChatTaskQueue(),
+      logger: createLogger("error")
+    });
+
+    const reply = vi.fn(async () => undefined);
+    await handler({
+      from: { id: 123 },
+      chat: { id: 77 },
+      reply
+    });
+
+    expect(reply).toHaveBeenCalledWith(expect.stringContaining("Vision model: gemma4:latest"));
+    expect(reply).toHaveBeenCalledWith(expect.stringContaining("Pending approvals in this chat: 1"));
+  });
+
+  it("lists pending approvals through /approvals", async () => {
+    const approvalStore = new ApprovalStore();
+    approvalStore.createShellApproval("77", "npm install", process.cwd());
+    const handler = createApprovalsCommandHandler({
+      allowedUserId: "123",
+      approvalStore,
+      pathAccessPolicy: createPathAccessPolicy(process.cwd()),
+      queue: new ChatTaskQueue(),
+      logger: createLogger("error")
+    });
+
+    const reply = vi.fn(async () => undefined);
+    await handler({
+      from: { id: 123 },
+      chat: { id: 77 },
+      reply
+    });
+
+    expect(reply).toHaveBeenCalledWith(expect.stringContaining("Pending approvals for this chat: 1"));
+    expect(reply).toHaveBeenCalledWith(expect.stringContaining("npm install"));
+  });
+
   it("approves a pending command and returns output", async () => {
     const approvalStore = new ApprovalStore();
     const approval = approvalStore.createShellApproval("77", "git status", process.cwd());
@@ -341,5 +425,42 @@ describe("Telegram message handler", () => {
     });
 
     expect(reply).toHaveBeenCalledWith(expect.stringContaining("Vision pipeline crashed"));
+  });
+
+  it("requests cancellation immediately for an active task", async () => {
+    const queue = new ChatTaskQueue();
+    queue.beginActiveRun("77");
+    const handler = createCancelCommandHandler({
+      allowedUserId: "123",
+      queue,
+      logger: createLogger("error")
+    });
+
+    const reply = vi.fn(async () => undefined);
+    await handler({
+      from: { id: 123 },
+      chat: { id: 77 },
+      reply
+    });
+
+    expect(queue.shouldCancel("77")).toBe(true);
+    expect(reply).toHaveBeenCalledWith(CANCEL_REQUESTED_MESSAGE);
+  });
+
+  it("reports when there is no task to cancel", async () => {
+    const handler = createCancelCommandHandler({
+      allowedUserId: "123",
+      queue: new ChatTaskQueue(),
+      logger: createLogger("error")
+    });
+
+    const reply = vi.fn(async () => undefined);
+    await handler({
+      from: { id: 123 },
+      chat: { id: 77 },
+      reply
+    });
+
+    expect(reply).toHaveBeenCalledWith(NO_ACTIVE_TASK_TO_CANCEL_MESSAGE);
   });
 });

@@ -1,5 +1,6 @@
 import { buildSystemPrompt } from "./prompt.js";
 import {
+  CANCELLATION_PROGRESS_MESSAGE,
   formatTaskStartedProgressMessage,
   formatToolFinishedProgressMessage,
   formatToolStartProgressMessage,
@@ -24,6 +25,7 @@ export const LOCAL_ERROR_MESSAGE =
   "I hit a local error before finishing. Send /last_error to inspect the most recent failure.";
 export const EMPTY_REPLY_MESSAGE =
   "I couldn't produce a useful reply.";
+export const CANCELED_MESSAGE = "Canceled the current task before finishing.";
 
 export interface AgentAttachment {
   kind: "image";
@@ -136,6 +138,14 @@ function extractToolAttachments(
       candidatePaths.push(parsed.path);
     }
 
+    if (toolName === "take_active_window_screenshot" && typeof parsed.path === "string") {
+      candidatePaths.push(parsed.path);
+    }
+
+    if (toolName === "click_element" && typeof parsed.screenshotPath === "string") {
+      candidatePaths.push(parsed.screenshotPath);
+    }
+
     if (
       (toolName === "ocr_read" || toolName === "find_element" || toolName === "wait_for_element") &&
       typeof parsed.screenshotPath === "string"
@@ -206,6 +216,16 @@ export class AgentLoop {
 
     try {
       await this.emitProgress(runOptions, formatTaskStartedProgressMessage(trimmedInput));
+      const canceledAtStart = await this.finishIfCanceled(
+        chatId,
+        trimmedInput,
+        appliedSteeringMessages,
+        attachments,
+        runOptions
+      );
+      if (canceledAtStart) {
+        return canceledAtStart;
+      }
 
       const extractedFacts = extractDurableFacts(trimmedInput);
       for (const fact of extractedFacts) {
@@ -214,6 +234,16 @@ export class AgentLoop {
 
       const directReply = this.tryDirectReply(chatId, trimmedInput);
       if (directReply) {
+        const canceledBeforeDirectReply = await this.finishIfCanceled(
+          chatId,
+          trimmedInput,
+          appliedSteeringMessages,
+          attachments,
+          runOptions
+        );
+        if (canceledBeforeDirectReply) {
+          return canceledBeforeDirectReply;
+        }
         await this.emitProgress(runOptions, PREPARING_REPLY_PROGRESS_MESSAGE);
         await this.persistTurn(chatId, trimmedInput, directReply);
         return {
@@ -224,6 +254,16 @@ export class AgentLoop {
 
       const directActionResult = await this.tryDirectAction(chatId, trimmedInput, runOptions);
       if (directActionResult) {
+        const canceledAfterDirectAction = await this.finishIfCanceled(
+          chatId,
+          trimmedInput,
+          appliedSteeringMessages,
+          directActionResult.attachments,
+          runOptions
+        );
+        if (canceledAfterDirectAction) {
+          return canceledAfterDirectAction;
+        }
         await this.emitProgress(runOptions, PREPARING_REPLY_PROGRESS_MESSAGE);
         await this.persistTurn(chatId, trimmedInput, directActionResult.replyText);
         return directActionResult;
@@ -244,12 +284,34 @@ export class AgentLoop {
       for (let iteration = 1; iteration <= this.options.maxIterations; iteration += 1) {
         this.options.logger.debug("agent.iteration.start", { iteration });
 
+        const canceledBeforeModel = await this.finishIfCanceled(
+          chatId,
+          trimmedInput,
+          appliedSteeringMessages,
+          attachments,
+          runOptions
+        );
+        if (canceledBeforeModel) {
+          return canceledBeforeModel;
+        }
+
         await this.applyPendingSteering(messages, runOptions, appliedSteeringMessages);
 
         const response = await llmClient.runStep({
           messages,
           tools
         });
+
+        const canceledAfterModel = await this.finishIfCanceled(
+          chatId,
+          trimmedInput,
+          appliedSteeringMessages,
+          attachments,
+          runOptions
+        );
+        if (canceledAfterModel) {
+          return canceledAfterModel;
+        }
 
         const steeringAppliedAfterResponse = await this.applyPendingSteering(
           messages,
@@ -267,6 +329,16 @@ export class AgentLoop {
         if (toolCalls.length === 0) {
           const content = response.message.content.trim();
           const finalReply = content.length > 0 ? content : EMPTY_REPLY_MESSAGE;
+          const canceledBeforeReply = await this.finishIfCanceled(
+            chatId,
+            trimmedInput,
+            appliedSteeringMessages,
+            attachments,
+            runOptions
+          );
+          if (canceledBeforeReply) {
+            return canceledBeforeReply;
+          }
           await this.emitProgress(runOptions, PREPARING_REPLY_PROGRESS_MESSAGE);
           await this.persistTurn(
             chatId,
@@ -280,6 +352,17 @@ export class AgentLoop {
         }
 
         for (const toolCall of toolCalls) {
+          const canceledBeforeTool = await this.finishIfCanceled(
+            chatId,
+            trimmedInput,
+            appliedSteeringMessages,
+            attachments,
+            runOptions
+          );
+          if (canceledBeforeTool) {
+            return canceledBeforeTool;
+          }
+
           const startedAt = Date.now();
           await this.emitProgress(
             runOptions,
@@ -291,7 +374,8 @@ export class AgentLoop {
           });
 
           const result = await this.options.toolRegistry.execute(toolCall.name, toolCall.arguments, {
-            chatId
+            chatId,
+            ...(runOptions.shouldCancel ? { shouldCancel: runOptions.shouldCancel } : {})
           });
 
           this.options.logger.info("agent.tool.result", {
@@ -305,6 +389,17 @@ export class AgentLoop {
           );
 
           attachments.push(...extractToolAttachments(toolCall.name, result, attachmentPaths));
+
+          const canceledAfterTool = await this.finishIfCanceled(
+            chatId,
+            trimmedInput,
+            appliedSteeringMessages,
+            attachments,
+            runOptions
+          );
+          if (canceledAfterTool) {
+            return canceledAfterTool;
+          }
 
           messages.push({
             role: "tool",
@@ -472,6 +567,34 @@ export class AgentLoop {
     }
 
     await runOptions.onProgress?.(message);
+  }
+
+  private async finishIfCanceled(
+    chatId: string,
+    userInput: string,
+    appliedSteeringMessages: string[],
+    attachments: AgentAttachment[],
+    runOptions: AgentRunOptions
+  ): Promise<AgentRunResult | undefined> {
+    if (!(await this.shouldCancel(runOptions))) {
+      return undefined;
+    }
+
+    await this.emitProgress(runOptions, CANCELLATION_PROGRESS_MESSAGE);
+    await this.persistTurn(
+      chatId,
+      mergeSteeringIntoUserInput(userInput, appliedSteeringMessages),
+      CANCELED_MESSAGE
+    );
+    return {
+      replyText: CANCELED_MESSAGE,
+      attachments
+    };
+  }
+
+  private async shouldCancel(runOptions: AgentRunOptions): Promise<boolean> {
+    const result = await runOptions.shouldCancel?.();
+    return result === true;
   }
 
   private async persistTurn(chatId: string, userInput: string, assistantReply: string): Promise<void> {

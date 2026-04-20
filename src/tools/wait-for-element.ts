@@ -57,7 +57,7 @@ export function createWaitForElementTool(
       required: ["query"],
       additionalProperties: false
     },
-    async execute(input) {
+    async execute(input, context) {
       const query = input.query;
       if (typeof query !== "string" || query.trim().length === 0) {
         return JSON.stringify({ ok: false, error: "query must be a non-empty string." });
@@ -87,6 +87,23 @@ export function createWaitForElementTool(
       }
 
       while (Date.now() - startedAt <= timeoutMs) {
+        if ((await context.shouldCancel?.()) === true) {
+          return JSON.stringify({
+            ok: false,
+            canceled: true,
+            error: "Task canceled.",
+            found: false,
+            label: "",
+            confidence: 0,
+            x: 0,
+            y: 0,
+            width: 0,
+            height: 0,
+            reason: "Task canceled.",
+            waitedMs: Date.now() - startedAt
+          });
+        }
+
         const screenshot = await desktopController.takeScreenshot(screenshotOptions);
         const result = await visionClient.findElement(screenshot.path, query);
         if (result.found) {
@@ -94,6 +111,24 @@ export function createWaitForElementTool(
             ...result,
             screenshotPath: screenshot.path,
             waitedMs: Date.now() - startedAt
+          });
+        }
+
+        if ((await context.shouldCancel?.()) === true) {
+          return JSON.stringify({
+            ok: false,
+            canceled: true,
+            error: "Task canceled.",
+            found: false,
+            label: "",
+            confidence: 0,
+            x: 0,
+            y: 0,
+            width: 0,
+            height: 0,
+            reason: "Task canceled.",
+            waitedMs: Date.now() - startedAt,
+            screenshotPath: screenshot.path
           });
         }
 

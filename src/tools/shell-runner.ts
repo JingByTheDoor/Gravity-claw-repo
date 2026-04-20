@@ -15,10 +15,16 @@ const SAFE_COMMAND_PREFIXES = [
   "rg ",
   "git status",
   "git diff",
+  "git diff --stat",
   "git log",
+  "git show",
   "whoami",
   "node -v",
   "npm -v",
+  "npm test",
+  "npm run build",
+  "npm run typecheck",
+  "tsc --noemit",
   "ollama list",
   "ollama ps"
 ];

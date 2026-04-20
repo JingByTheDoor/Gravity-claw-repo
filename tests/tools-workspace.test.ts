@@ -4,7 +4,9 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createListFilesTool } from "../src/tools/list-files.js";
 import { createReadFileTool } from "../src/tools/read-file.js";
+import { createReplaceInFileTool } from "../src/tools/replace-in-file.js";
 import { createSearchFilesTool } from "../src/tools/search-files.js";
+import { createWriteFileTool } from "../src/tools/write-file.js";
 import { createPathAccessPolicy } from "../src/tools/workspace.js";
 
 const tempRoots: string[] = [];
@@ -112,5 +114,53 @@ describe("workspace tools", () => {
 
     expect(result.ok).toBe(false);
     expect(result.error).toContain("outside the allowed local roots");
+  });
+
+  it("writes files inside trusted roots", async () => {
+    const workspaceRoot = createTempWorkspace();
+    const tool = createWriteFileTool(createPathAccessPolicy(workspaceRoot));
+
+    const result = JSON.parse(
+      await tool.execute(
+        {
+          path: "notes/out.txt",
+          content: "hello world",
+          mode: "overwrite"
+        },
+        { chatId: "chat-1" }
+      )
+    ) as {
+      ok: boolean;
+      path: string;
+    };
+
+    expect(result.ok).toBe(true);
+    expect(result.path).toBe("notes/out.txt");
+    expect(fs.readFileSync(path.join(workspaceRoot, "notes", "out.txt"), "utf8")).toBe("hello world");
+  });
+
+  it("replaces text in trusted files", async () => {
+    const workspaceRoot = createTempWorkspace();
+    fs.writeFileSync(path.join(workspaceRoot, "todo.txt"), "TODO\nTODO\n");
+    const tool = createReplaceInFileTool(createPathAccessPolicy(workspaceRoot));
+
+    const result = JSON.parse(
+      await tool.execute(
+        {
+          path: "todo.txt",
+          find: "TODO",
+          replace: "DONE",
+          all: "true"
+        },
+        { chatId: "chat-1" }
+      )
+    ) as {
+      ok: boolean;
+      replacements: number;
+    };
+
+    expect(result.ok).toBe(true);
+    expect(result.replacements).toBe(2);
+    expect(fs.readFileSync(path.join(workspaceRoot, "todo.txt"), "utf8")).toBe("DONE\nDONE\n");
   });
 });

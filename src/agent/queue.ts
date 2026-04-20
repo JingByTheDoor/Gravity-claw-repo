@@ -2,6 +2,7 @@ export class ChatTaskQueue {
   private readonly lanes = new Map<string, Promise<unknown>>();
   private readonly activeRuns = new Set<string>();
   private readonly steeringMessages = new Map<string, string[]>();
+  private readonly cancelRequests = new Set<string>();
 
   run<T>(chatId: string, task: () => Promise<T>): Promise<T> {
     const previous = this.lanes.get(chatId) ?? Promise.resolve();
@@ -23,11 +24,13 @@ export class ChatTaskQueue {
 
     this.activeRuns.add(chatId);
     this.steeringMessages.delete(chatId);
+    this.cancelRequests.delete(chatId);
   }
 
   endActiveRun(chatId: string): void {
     this.activeRuns.delete(chatId);
     this.steeringMessages.delete(chatId);
+    this.cancelRequests.delete(chatId);
   }
 
   isActiveRun(chatId: string): boolean {
@@ -58,5 +61,18 @@ export class ChatTaskQueue {
 
     this.steeringMessages.delete(chatId);
     return [...messages];
+  }
+
+  requestCancel(chatId: string): boolean {
+    if (!this.activeRuns.has(chatId)) {
+      return false;
+    }
+
+    this.cancelRequests.add(chatId);
+    return true;
+  }
+
+  shouldCancel(chatId: string): boolean {
+    return this.cancelRequests.has(chatId);
   }
 }

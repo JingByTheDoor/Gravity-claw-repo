@@ -1,6 +1,7 @@
 import { Bot } from "grammy";
 import type { AgentLoop } from "../agent/loop.js";
 import type { ChatTaskQueue } from "../agent/queue.js";
+import type { StatusService } from "../app/status-service.js";
 import type { ApprovalStore } from "../approvals/store.js";
 import type { RuntimeErrorStore } from "../errors/runtime-error-store.js";
 import type { Logger } from "../logging/logger.js";
@@ -8,11 +9,15 @@ import type { MemoryStoreLike } from "../memory/store.js";
 import type { ShellRunner } from "../tools/shell-runner.js";
 import type { PathAccessPolicy } from "../tools/workspace.js";
 import {
+  createApprovalsCommandHandler,
   createApproveCommandHandler,
+  createCancelCommandHandler,
   createDenyCommandHandler,
+  createHelpCommandHandler,
   createLastErrorCommandHandler,
   createMessageHandler,
-  createNewCommandHandler
+  createNewCommandHandler,
+  createStatusCommandHandler
 } from "./handlers.js";
 
 interface CreateBotOptions {
@@ -26,6 +31,7 @@ interface CreateBotOptions {
   pathAccessPolicy: PathAccessPolicy;
   queue: ChatTaskQueue;
   logger: Logger;
+  statusService: StatusService;
 }
 
 export function createBot(options: CreateBotOptions): Bot {
@@ -41,6 +47,29 @@ export function createBot(options: CreateBotOptions): Bot {
     approvalStore: options.approvalStore,
     shellRunner: options.shellRunner,
     pathAccessPolicy: options.pathAccessPolicy,
+    queue: options.queue,
+    logger: options.logger
+  });
+  const helpCommandHandler = createHelpCommandHandler({
+    allowedUserId: options.allowedUserId,
+    queue: options.queue,
+    logger: options.logger
+  });
+  const statusCommandHandler = createStatusCommandHandler({
+    allowedUserId: options.allowedUserId,
+    statusService: options.statusService,
+    queue: options.queue,
+    logger: options.logger
+  });
+  const approvalsCommandHandler = createApprovalsCommandHandler({
+    allowedUserId: options.allowedUserId,
+    approvalStore: options.approvalStore,
+    pathAccessPolicy: options.pathAccessPolicy,
+    queue: options.queue,
+    logger: options.logger
+  });
+  const cancelCommandHandler = createCancelCommandHandler({
+    allowedUserId: options.allowedUserId,
     queue: options.queue,
     logger: options.logger
   });
@@ -65,10 +94,14 @@ export function createBot(options: CreateBotOptions): Bot {
     logger: options.logger
   });
 
+  bot.command("help", helpCommandHandler);
   bot.command("new", newCommandHandler);
+  bot.command("status", statusCommandHandler);
+  bot.command("approvals", approvalsCommandHandler);
   bot.command("last_error", lastErrorCommandHandler);
   bot.command("approve", async (context) => approveCommandHandler(context, context.match));
   bot.command("deny", async (context) => denyCommandHandler(context, context.match));
+  bot.command("cancel", cancelCommandHandler);
   bot.on("message", messageHandler);
   bot.catch((error) => {
     options.logger.error("telegram.bot.error", {

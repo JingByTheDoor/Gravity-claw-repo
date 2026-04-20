@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ApprovalStore } from "../src/approvals/store.js";
 import { createLogger } from "../src/logging/logger.js";
 import { createRunShellCommandTool } from "../src/tools/run-shell-command.js";
-import type { ShellExecutionResult } from "../src/tools/shell-runner.js";
+import { isSafeShellCommand, type ShellExecutionResult } from "../src/tools/shell-runner.js";
 import { createPathAccessPolicy } from "../src/tools/workspace.js";
 
 function createTempRoot(): string {
@@ -134,5 +134,14 @@ describe("run_shell_command tool", () => {
     expect(result.ok).toBe(false);
     expect(result.error).toContain("outside the allowed local roots");
     expect(shellRunner.execute).not.toHaveBeenCalled();
+  });
+
+  it("treats common build and inspection commands as safe", () => {
+    expect(isSafeShellCommand("npm test")).toBe(true);
+    expect(isSafeShellCommand("npm run build")).toBe(true);
+    expect(isSafeShellCommand("npm run typecheck")).toBe(true);
+    expect(isSafeShellCommand("tsc --noEmit")).toBe(true);
+    expect(isSafeShellCommand("git show HEAD~1")).toBe(true);
+    expect(isSafeShellCommand("git diff --stat")).toBe(true);
   });
 });
