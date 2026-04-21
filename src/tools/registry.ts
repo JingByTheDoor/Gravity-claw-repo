@@ -17,6 +17,7 @@ import { createClickElementTool } from "./click-element.js";
 import { createCloseAppTool } from "./close-app.js";
 import { DesktopController } from "./desktop-controller.js";
 import { createFindElementTool } from "./find-element.js";
+import { createFetchWebPageTool } from "./fetch-web-page.js";
 import { createFocusAppTool } from "./focus-app.js";
 import { createGetActiveAppTool } from "./get-active-app.js";
 import { createGetCurrentTimeTool } from "./get-current-time.js";
@@ -35,6 +36,7 @@ import { createResolveKnownFolderTool } from "./resolve-known-folder.js";
 import { createReplaceInFileTool } from "./replace-in-file.js";
 import { createRunShellCommandTool } from "./run-shell-command.js";
 import { createSearchFilesTool } from "./search-files.js";
+import { createSearchWebTool } from "./search-web.js";
 import { createTakeActiveWindowScreenshotTool } from "./take-active-window-screenshot.js";
 import { createTakeScreenshotTool } from "./take-screenshot.js";
 import { VisionClient } from "./vision-client.js";
@@ -101,6 +103,8 @@ export function createDefaultToolRegistry(options: CreateDefaultToolRegistryOpti
     createRememberFactTool(options.memoryStore),
     createRecallMemoryTool(options.memoryStore),
     createRequestExternalReviewTool(options.approvalStore, options.approvalPolicy),
+    createSearchWebTool(),
+    createFetchWebPageTool(),
     createLaunchAppTool(options.appLauncher),
     createBrowserNavigateTool(options.browserController),
     createBrowserSearchTool(options.browserController),

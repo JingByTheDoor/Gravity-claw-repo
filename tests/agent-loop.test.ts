@@ -760,4 +760,60 @@ describe("AgentLoop", () => {
 
     expect(toolExecute).not.toHaveBeenCalled();
   });
+
+  it("falls back to the last useful web result when the model returns an empty reply", async () => {
+    const llmClient: LLMClient = {
+      checkHealth: vi.fn(async () => undefined),
+      runStep: vi
+        .fn()
+        .mockResolvedValueOnce({
+          message: {
+            role: "assistant",
+            content: "",
+            toolCalls: [{ name: "search_web", arguments: { query: "weather in vancouver canada" } }]
+          }
+        } satisfies LLMRunResponse)
+        .mockResolvedValueOnce({
+          message: {
+            role: "assistant",
+            content: ""
+          }
+        } satisfies LLMRunResponse)
+    };
+
+    const loop = new AgentLoop({
+      llmClient,
+      toolRegistry: new ToolRegistry([{
+        name: "search_web",
+        description: "test web search",
+        parameters: {
+          type: "object",
+          properties: {},
+          additionalProperties: false
+        },
+        execute: vi.fn(async () =>
+          JSON.stringify({
+            ok: true,
+            query: "weather in vancouver canada",
+            results: [{
+              title: "Vancouver weather",
+              url: "https://example.com/weather",
+              snippet: "Sunny, 24 C, feels like 25 C."
+            }]
+          })
+        )
+      }]),
+      memoryStore: createMemoryStoreStub(),
+      maxIterations: 4,
+      logger: createLogger("error"),
+      errorStore: new RuntimeErrorStore()
+    });
+
+    await expect(loop.run("chat-1", "what the weather in vancouver canada right now?")).resolves.toEqual({
+      state: "completed",
+      replyText:
+        "I found these web results:\n- Vancouver weather (https://example.com/weather) - Sunny, 24 C, feels like 25 C.",
+      attachments: []
+    });
+  });
 });

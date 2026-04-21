@@ -188,6 +188,12 @@ export function formatToolStartProgressMessage(
       return "Status: preparing an action for your review";
     case "get_current_time":
       return "Status: checking the current time";
+    case "search_web":
+      return query
+        ? `Status: searching the web for ${quoteValue(query, 70)}`
+        : "Status: searching the web";
+    case "fetch_web_page":
+      return "Status: fetching a web page";
     case "remember_fact":
       return "Status: saving that detail for later";
     case "recall_memory":
@@ -445,6 +451,10 @@ export function formatToolFinishedProgressMessage(
         : "Status: could not prepare the external action review";
     case "get_current_time":
       return ok ? "Status: checked the current time" : "Status: could not check the current time";
+    case "search_web":
+      return ok ? "Status: finished the web search" : "Status: could not search the web";
+    case "fetch_web_page":
+      return ok ? "Status: finished fetching the web page" : "Status: could not fetch the web page";
     case "remember_fact":
       return ok ? "Status: saved that detail for later" : "Status: could not save that detail";
     case "recall_memory":

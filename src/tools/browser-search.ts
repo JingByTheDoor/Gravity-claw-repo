@@ -9,12 +9,12 @@ function resolveSearchProvider(rawProvider: unknown): SearchProvider {
     typeof rawProvider === "string" ? rawProvider.trim().toLowerCase() : "";
 
   switch (normalized) {
+    case "bing":
     case "google":
     case "duckduckgo":
       return normalized;
-    case "bing":
     default:
-      return "bing";
+      return "duckduckgo";
   }
 }
 
@@ -25,7 +25,7 @@ function buildSearchUrl(query: string, provider: SearchProvider): string {
     case "google":
       return `https://www.google.com/search?q=${encodedQuery}`;
     case "duckduckgo":
-      return `https://duckduckgo.com/?q=${encodedQuery}`;
+      return `https://lite.duckduckgo.com/lite/?q=${encodedQuery}`;
     case "bing":
     default:
       return `https://www.bing.com/search?q=${encodedQuery}`;
@@ -46,7 +46,7 @@ export function createBrowserSearchTool(browserController: BrowserController): T
         },
         provider: {
           type: "string",
-          description: "Optional provider: bing, google, or duckduckgo. Defaults to bing."
+          description: "Optional provider: bing, google, or duckduckgo. Defaults to duckduckgo."
         },
         timeout_ms: {
           type: "string",

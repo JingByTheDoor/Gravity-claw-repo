@@ -248,6 +248,82 @@ function readApprovalMessage(rawResult: string, approvalId: string): string {
   return `Action requires approval. Send /approve ${approvalId} or /deny ${approvalId}.`;
 }
 
+function tryParseToolPayload(rawContent: string): Record<string, unknown> | undefined {
+  try {
+    const parsed = JSON.parse(rawContent) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function clipFallbackText(text: string, maxLength = 500): string {
+  const normalized = text
+    .replace(/\r/g, "")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, Math.max(maxLength - 1, 1)).trimEnd()}...`;
+}
+
+function buildToolFallbackReply(messages: AgentMessage[]): string | undefined {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (!message || message.role !== "tool" || !message.toolName) {
+      continue;
+    }
+
+    const payload = tryParseToolPayload(message.content);
+    if (!payload || payload.ok === false) {
+      continue;
+    }
+
+    if (message.toolName === "search_web") {
+      const results = Array.isArray(payload.results)
+        ? payload.results
+            .filter(
+              (result): result is { title?: unknown; url?: unknown; snippet?: unknown } =>
+                Boolean(result) && typeof result === "object"
+            )
+            .slice(0, 3)
+        : [];
+
+      if (results.length > 0) {
+        return [
+          "I found these web results:",
+          ...results.map((result) => {
+            const title = typeof result.title === "string" ? result.title.trim() : "Untitled";
+            const url = typeof result.url === "string" ? result.url.trim() : "";
+            const snippet =
+              typeof result.snippet === "string" && result.snippet.trim().length > 0
+                ? ` - ${result.snippet.trim()}`
+                : "";
+            return `- ${title}${url ? ` (${url})` : ""}${snippet}`;
+          })
+        ].join("\n");
+      }
+    }
+
+    const text = typeof payload.text === "string" ? payload.text.trim() : "";
+    if (text.length > 0) {
+      const title = typeof payload.title === "string" ? payload.title.trim() : "";
+      return [
+        title ? `I found this on ${title}:` : "I found this on the page:",
+        clipFallbackText(text)
+      ].join("\n");
+    }
+  }
+
+  return undefined;
+}
+
 function formatSteeringMessage(steeringMessages: string[]): string {
   return [
     "Live steering for the current task.",
@@ -404,7 +480,10 @@ export class AgentLoop {
         const toolCalls = response.message.toolCalls ?? [];
         if (toolCalls.length === 0) {
           const content = response.message.content.trim();
-          const finalReply = content.length > 0 ? content : EMPTY_REPLY_MESSAGE;
+          const finalReply =
+            content.length > 0
+              ? content
+              : buildToolFallbackReply(messages) ?? EMPTY_REPLY_MESSAGE;
           const canceledBeforeReply = await this.finishIfCanceled(
             chatId,
             trimmedInput,
