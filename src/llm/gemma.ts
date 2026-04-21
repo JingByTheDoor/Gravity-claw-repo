@@ -6,6 +6,7 @@ export interface OllamaSamplingConfig {
   temperature: number;
   topP: number;
   topK: number;
+  numCtx?: number;
 }
 
 export function prependGemmaThinkingToken(systemPrompt: string, enabled: boolean): string {

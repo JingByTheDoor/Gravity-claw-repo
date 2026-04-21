@@ -35,6 +35,7 @@ function createEnv(databasePath: string): AppEnv {
     ollamaTemperature: 1,
     ollamaTopP: 0.95,
     ollamaTopK: 64,
+    ollamaNumCtx: 4096,
     ollamaEnableThinking: false,
     workerLabel: "Gravity Claw Worker",
     workerMode: "local",

@@ -8,6 +8,7 @@ import type { AppEnv } from "../config/env.js";
 import { loadEnv } from "../config/env.js";
 import { RuntimeErrorStore } from "../errors/runtime-error-store.js";
 import { createLogger } from "../logging/logger.js";
+import { FallbackLLMClient } from "../llm/fallback-client.js";
 import { OllamaModelProvider } from "../llm/provider.js";
 import { FastFirstTaskRouter } from "../llm/task-router.js";
 import { MemoryStore } from "../memory/store.js";
@@ -79,7 +80,8 @@ export async function buildApp(env: AppEnv = loadEnv()): Promise<AppServices> {
     sampling: {
       temperature: env.ollamaTemperature,
       topP: env.ollamaTopP,
-      topK: env.ollamaTopK
+      topK: env.ollamaTopK,
+      numCtx: env.ollamaNumCtx
     },
     ...(env.ollamaVisionTokenBudget !== undefined
       ? { visionTokenBudget: env.ollamaVisionTokenBudget }
@@ -122,6 +124,26 @@ export async function buildApp(env: AppEnv = loadEnv()): Promise<AppServices> {
   });
   const ollamaClient = modelProvider.createChatClient(env.ollamaModel);
   const fastOllamaClient = modelProvider.createChatClient(env.ollamaFastModel);
+  const primaryChatClient =
+    env.ollamaFastModel !== env.ollamaModel
+      ? new FallbackLLMClient({
+          primaryClient: ollamaClient,
+          primaryModel: env.ollamaModel,
+          fallbackClient: fastOllamaClient,
+          fallbackModel: env.ollamaFastModel,
+          logger
+        })
+      : ollamaClient;
+  const fastChatClient =
+    env.ollamaFastModel !== env.ollamaModel
+      ? new FallbackLLMClient({
+          primaryClient: fastOllamaClient,
+          primaryModel: env.ollamaFastModel,
+          fallbackClient: ollamaClient,
+          fallbackModel: env.ollamaModel,
+          logger
+        })
+      : fastOllamaClient;
 
   await Promise.all([
     ollamaClient.checkHealth(),
@@ -134,8 +156,8 @@ export async function buildApp(env: AppEnv = loadEnv()): Promise<AppServices> {
   const taskRouter =
     env.ollamaFastModel !== env.ollamaModel
       ? new FastFirstTaskRouter({
-          fastClient: fastOllamaClient,
-          primaryClient: ollamaClient,
+          fastClient: fastChatClient,
+          primaryClient: primaryChatClient,
           fastModel: env.ollamaFastModel,
           primaryModel: env.ollamaModel,
           logger
@@ -143,7 +165,7 @@ export async function buildApp(env: AppEnv = loadEnv()): Promise<AppServices> {
       : undefined;
 
   const agentLoop = new AgentLoop({
-    llmClient: ollamaClient,
+    llmClient: primaryChatClient,
     ...(taskRouter ? { taskRouter } : {}),
     toolRegistry,
     memoryStore,
@@ -261,6 +283,7 @@ export async function startApp(app: AppServices): Promise<void> {
             ollamaTemperature: app.env.ollamaTemperature,
             ollamaTopP: app.env.ollamaTopP,
             ollamaTopK: app.env.ollamaTopK,
+            ollamaNumCtx: app.env.ollamaNumCtx,
             ollamaEnableThinking: app.env.ollamaEnableThinking,
             ollamaVisionTokenBudget: app.env.ollamaVisionTokenBudget ?? null,
             fastRoutingEnabled: app.env.ollamaFastModel !== app.env.ollamaModel,

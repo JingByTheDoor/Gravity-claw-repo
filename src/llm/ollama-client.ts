@@ -12,6 +12,7 @@ interface OllamaClientOptions {
   sampling: OllamaSamplingConfig;
   healthCheckMaxAttempts?: number;
   healthCheckRetryDelayMs?: number;
+  chatRequestTimeoutMs?: number;
 }
 
 interface OllamaTagsResponse {
@@ -47,6 +48,7 @@ interface OllamaMessage {
 
 const DEFAULT_HEALTH_CHECK_MAX_ATTEMPTS = 6;
 const DEFAULT_HEALTH_CHECK_RETRY_DELAY_MS = 1_000;
+const DEFAULT_CHAT_REQUEST_TIMEOUT_MS = 45_000;
 
 export class OllamaClient implements LLMClient {
   constructor(private readonly options: OllamaClientOptions) {}
@@ -103,6 +105,17 @@ export class OllamaClient implements LLMClient {
 
   async runStep(request: LLMRunRequest): Promise<LLMRunResponse> {
     const url = this.buildUrl("/api/chat");
+    const timeoutMs = Math.max(
+      1_000,
+      this.options.chatRequestTimeoutMs ?? DEFAULT_CHAT_REQUEST_TIMEOUT_MS
+    );
+    const controller = new AbortController();
+    let didTimeout = false;
+    const timeoutHandle = setTimeout(() => {
+      didTimeout = true;
+      controller.abort();
+    }, timeoutMs);
+
     try {
       const response = await fetch(url, {
         method: "POST",
@@ -122,7 +135,8 @@ export class OllamaClient implements LLMClient {
             }
           })),
           options: buildOllamaRequestOptions(this.options.sampling)
-        })
+        }),
+        signal: controller.signal
       });
 
       if (!response.ok) {
@@ -144,7 +158,12 @@ export class OllamaClient implements LLMClient {
         }
       };
     } catch (error) {
+      if (didTimeout) {
+        throw this.normalizeChatError(new Error(`request timed out after ${timeoutMs}ms`), url);
+      }
       throw this.normalizeChatError(error, url);
+    } finally {
+      clearTimeout(timeoutHandle);
     }
   }
 

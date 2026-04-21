@@ -16,6 +16,7 @@ const envSchema = z.object({
   OLLAMA_TEMPERATURE: z.coerce.number().min(0).default(1),
   OLLAMA_TOP_P: z.coerce.number().gt(0).max(1).default(0.95),
   OLLAMA_TOP_K: z.coerce.number().int().positive().default(64),
+  OLLAMA_NUM_CTX: z.coerce.number().int().positive().max(131072).default(4096),
   OLLAMA_ENABLE_THINKING: z
     .enum(["true", "false"])
     .default("false")
@@ -65,6 +66,7 @@ export interface AppEnv {
   ollamaTemperature: number;
   ollamaTopP: number;
   ollamaTopK: number;
+  ollamaNumCtx: number;
   ollamaEnableThinking: boolean;
   ollamaVisionTokenBudget?: GemmaVisionTokenBudget;
   workerLabel: string;
@@ -134,6 +136,7 @@ export function parseEnv(source: Record<string, string | undefined>): AppEnv {
     ollamaTemperature: result.data.OLLAMA_TEMPERATURE,
     ollamaTopP: result.data.OLLAMA_TOP_P,
     ollamaTopK: result.data.OLLAMA_TOP_K,
+    ollamaNumCtx: result.data.OLLAMA_NUM_CTX,
     ollamaEnableThinking: result.data.OLLAMA_ENABLE_THINKING,
     ...(result.data.OLLAMA_VISION_TOKEN_BUDGET !== undefined
       ? { ollamaVisionTokenBudget: result.data.OLLAMA_VISION_TOKEN_BUDGET }
