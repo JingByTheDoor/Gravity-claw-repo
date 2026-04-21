@@ -844,4 +844,67 @@ describe("AgentLoop", () => {
       attachments: []
     });
   });
+
+  it("replaces a generic search-based reply with the concrete fetched result", async () => {
+    const llmClient: LLMClient = {
+      checkHealth: vi.fn(async () => undefined),
+      runStep: vi
+        .fn()
+        .mockResolvedValueOnce({
+          message: {
+            role: "assistant",
+            content: "",
+            toolCalls: [{ name: "search_web", arguments: { query: "weather in vancouver canada" } }]
+          }
+        } satisfies LLMRunResponse)
+        .mockResolvedValueOnce({
+          message: {
+            role: "assistant",
+            content:
+              "Here are some current and upcoming weather forecasts for Vancouver, Canada. Would you like to explore any of these links further?"
+          }
+        } satisfies LLMRunResponse)
+    };
+
+    const loop = new AgentLoop({
+      llmClient,
+      toolRegistry: new ToolRegistry([{
+        name: "search_web",
+        description: "test web search",
+        parameters: {
+          type: "object",
+          properties: {},
+          additionalProperties: false
+        },
+        execute: vi.fn(async () =>
+          JSON.stringify({
+            ok: true,
+            query: "weather in vancouver canada",
+            results: [{
+              title: "Vancouver weather",
+              url: "https://example.com/weather",
+              snippet: "Sunny, 24 C, feels like 25 C."
+            }],
+            bestResult: {
+              title: "Vancouver weather",
+              url: "https://example.com/weather",
+              pageTitle: "Vancouver current conditions",
+              text: "Current conditions: 24 C, sunny, feels like 25 C."
+            }
+          })
+        )
+      }]),
+      memoryStore: createMemoryStoreStub(),
+      maxIterations: 4,
+      logger: createLogger("error"),
+      errorStore: new RuntimeErrorStore()
+    });
+
+    await expect(loop.run("chat-1", "what is the weather in vancouver canada right now?")).resolves.toEqual({
+      state: "completed",
+      replyText:
+        "I found this on Vancouver current conditions:\nCurrent conditions: 24 C, sunny, feels like 25 C.\nSource: https://example.com/weather",
+      attachments: []
+    });
+  });
 });

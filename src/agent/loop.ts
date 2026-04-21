@@ -274,6 +274,22 @@ function clipFallbackText(text: string, maxLength = 500): string {
   return `${normalized.slice(0, Math.max(maxLength - 1, 1)).trimEnd()}...`;
 }
 
+function isLowSignalToolBackedReply(text: string): boolean {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (normalized.length === 0) {
+    return false;
+  }
+
+  return [
+    /\bwould you like (?:to|me to) (?:explore|open|check|look|go)\b/i,
+    /\byou might check(?: out)?\b/i,
+    /\byou can check\b/i,
+    /\bservices like\b/i,
+    /\bcurrent and upcoming\b/i,
+    /\bhere are some .* forecasts\b/i
+  ].some((pattern) => pattern.test(normalized));
+}
+
 function buildToolFallbackReply(messages: AgentMessage[]): string | undefined {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
@@ -287,6 +303,28 @@ function buildToolFallbackReply(messages: AgentMessage[]): string | undefined {
     }
 
     if (message.toolName === "search_web") {
+      const bestResult =
+        payload.bestResult && typeof payload.bestResult === "object"
+          ? (payload.bestResult as Record<string, unknown>)
+          : undefined;
+      const bestResultText =
+        bestResult && typeof bestResult.text === "string" ? bestResult.text.trim() : "";
+      if (bestResultText.length > 0) {
+        const pageTitle =
+          bestResult && typeof bestResult.pageTitle === "string" ? bestResult.pageTitle.trim() : "";
+        const resultTitle =
+          bestResult && typeof bestResult.title === "string" ? bestResult.title.trim() : "";
+        const title = pageTitle || resultTitle;
+        const url =
+          bestResult && typeof bestResult.url === "string" ? bestResult.url.trim() : "";
+
+        return [
+          title ? `I found this on ${title}:` : "I found this on the web:",
+          clipFallbackText(bestResultText),
+          ...(url ? [`Source: ${url}`] : [])
+        ].join("\n");
+      }
+
       const results = Array.isArray(payload.results)
         ? payload.results
             .filter(
@@ -481,10 +519,13 @@ export class AgentLoop {
         const toolCalls = response.message.toolCalls ?? [];
         if (toolCalls.length === 0) {
           const content = response.message.content.trim();
+          const fallbackReply = buildToolFallbackReply(messages);
           const finalReply =
             content.length > 0
-              ? content
-              : buildToolFallbackReply(messages) ?? EMPTY_REPLY_MESSAGE;
+              ? isLowSignalToolBackedReply(content) && fallbackReply
+                ? fallbackReply
+                : content
+              : fallbackReply ?? EMPTY_REPLY_MESSAGE;
           const canceledBeforeReply = await this.finishIfCanceled(
             chatId,
             trimmedInput,

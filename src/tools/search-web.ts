@@ -10,6 +10,16 @@ interface SearchResult {
   snippet?: string;
 }
 
+interface BestSearchResult extends SearchResult {
+  pageTitle?: string;
+  text?: string;
+  contentType?: string;
+  truncated?: boolean;
+}
+
+const DEFAULT_MAX_PAGE_CHARS = 2_500;
+const DEFAULT_PREFETCH_TIMEOUT_MS = 12_000;
+
 function decodeHtml(value: string): string {
   return value
     .replace(/&amp;/g, "&")
@@ -64,6 +74,86 @@ function parseSearchResults(html: string, maxResults: number): SearchResult[] {
   return results;
 }
 
+function stripHtml(html: string): string {
+  return decodeHtml(
+    html
+      .replace(/<script[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style[\s\S]*?<\/style>/gi, " ")
+      .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ")
+      .replace(/<\/(p|div|section|article|h\d|li|tr|td|br)>/gi, "\n")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\r/g, "")
+      .replace(/[ \t]+\n/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .replace(/\s+/g, " ")
+  ).trim();
+}
+
+function extractTitle(html: string): string | undefined {
+  const match = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  const title = match?.[1] ? decodeHtml(match[1]).trim() : "";
+  return title || undefined;
+}
+
+async function fetchBestResult(
+  fetchImpl: typeof fetch,
+  results: SearchResult[],
+  maxPageChars: number
+): Promise<BestSearchResult | undefined> {
+  for (const result of results.slice(0, 3)) {
+    const controller = new AbortController();
+    const timeoutHandle = setTimeout(() => controller.abort(), DEFAULT_PREFETCH_TIMEOUT_MS);
+
+    try {
+      const response = await fetchImpl(result.url, {
+        headers: {
+          "User-Agent": "Gravity Claw/0.1"
+        },
+        signal: controller.signal
+      });
+      if (!response.ok) {
+        continue;
+      }
+
+      const contentType = response.headers.get("content-type") ?? "";
+      if (/json/i.test(contentType)) {
+        const payload = await response.json();
+        const text = JSON.stringify(payload, null, 2);
+        if (!text.trim()) {
+          continue;
+        }
+
+        return {
+          ...result,
+          contentType,
+          text: text.slice(0, maxPageChars),
+          truncated: text.length > maxPageChars
+        };
+      }
+
+      const html = await response.text();
+      const text = stripHtml(html);
+      if (!text) {
+        continue;
+      }
+
+      return {
+        ...result,
+        ...(extractTitle(html) ? { pageTitle: extractTitle(html)! } : {}),
+        ...(contentType ? { contentType } : {}),
+        text: text.slice(0, maxPageChars),
+        truncated: text.length > maxPageChars
+      };
+    } catch {
+      continue;
+    } finally {
+      clearTimeout(timeoutHandle);
+    }
+  }
+
+  return undefined;
+}
+
 export function createSearchWebTool(options: SearchWebToolOptions = {}): ToolDefinition {
   const fetchImpl = options.fetchImpl ?? fetch;
 
@@ -81,6 +171,11 @@ export function createSearchWebTool(options: SearchWebToolOptions = {}): ToolDef
         max_results: {
           type: "string",
           description: "Optional number of results to return. Defaults to 5."
+        },
+        max_page_chars: {
+          type: "string",
+          description:
+            "Optional maximum number of characters to include from the best fetched result page. Defaults to 2500."
         }
       },
       required: ["query"],
@@ -100,6 +195,14 @@ export function createSearchWebTool(options: SearchWebToolOptions = {}): ToolDef
         Number.isFinite(maxResultsRaw) && maxResultsRaw > 0
           ? Math.min(maxResultsRaw, 10)
           : 5;
+      const maxPageCharsRaw =
+        typeof input.max_page_chars === "string"
+          ? Number.parseInt(input.max_page_chars, 10)
+          : DEFAULT_MAX_PAGE_CHARS;
+      const maxPageChars =
+        Number.isFinite(maxPageCharsRaw) && maxPageCharsRaw > 0
+          ? Math.min(maxPageCharsRaw, 8_000)
+          : DEFAULT_MAX_PAGE_CHARS;
 
       try {
         const response = await fetchImpl(
@@ -114,11 +217,13 @@ export function createSearchWebTool(options: SearchWebToolOptions = {}): ToolDef
 
         const html = await response.text();
         const results = parseSearchResults(html, maxResults);
+        const bestResult = await fetchBestResult(fetchImpl, results, maxPageChars);
 
         return JSON.stringify({
           ok: true,
           query,
-          results
+          results,
+          ...(bestResult ? { bestResult } : {})
         });
       } catch (error) {
         return JSON.stringify({
