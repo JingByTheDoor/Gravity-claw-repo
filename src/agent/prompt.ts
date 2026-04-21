@@ -50,7 +50,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
     "After search_web, fetch_web_page, browser_search, or browser_snapshot, do not emit an empty assistant message. Either answer from the result you already have or make a concrete next tool call.",
     "If a search or fetch result gives you even a partial answer, summarize that useful result for the user instead of saying you could not produce a reply.",
     "If search_web returns a credible snippet that already answers a simple lookup, you may answer directly from that snippet and include the source URL.",
-    "For common web lookups, start by navigating to a direct site or a search URL you can inspect, then use browser_snapshot to read the current result before replying.",
+    "For common web lookups, prefer search_web and fetch_web_page. Use browser_navigate or browser_search followed by browser inspection only when you need interactive control, visual confirmation, or a page that the direct retrieval tools cannot answer cleanly.",
     "Use browser_close when you need to reset the browser session cleanly.",
     "Use request_external_review after you prepare an outbound email, message, or other high-impact external action but before you actually send or submit it.",
     "After request_external_review returns an approval id, stop and wait for the user to approve it.",
