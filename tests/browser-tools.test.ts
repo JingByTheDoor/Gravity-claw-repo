@@ -6,6 +6,7 @@ import { createBrowserClickTool } from "../src/tools/browser-click.js";
 import { createBrowserCloseTool } from "../src/tools/browser-close.js";
 import { BrowserController } from "../src/tools/browser-controller.js";
 import { createBrowserNavigateTool } from "../src/tools/browser-navigate.js";
+import { createBrowserSearchTool } from "../src/tools/browser-search.js";
 import { createBrowserScreenshotTool } from "../src/tools/browser-screenshot.js";
 import { createBrowserSnapshotTool } from "../src/tools/browser-snapshot.js";
 import { createBrowserTypeTool } from "../src/tools/browser-type.js";
@@ -176,6 +177,40 @@ describe("browser tools", () => {
     });
     expect(result.ok).toBe(true);
     expect(result.title).toBe("Example Domain");
+  });
+
+  it("builds a direct search URL and delegates it through browser navigation", async () => {
+    const navigate = vi.fn(async () => ({
+      ok: true,
+      url: "https://www.bing.com/search?q=weather",
+      title: "weather - Search",
+      status: 200
+    }));
+    const tool = createBrowserSearchTool({ navigate } as never);
+
+    const result = JSON.parse(
+      await tool.execute(
+        {
+          query: "weather in vancouver canada right now",
+          provider: "bing",
+          timeout_ms: "3000"
+        },
+        { chatId: "chat-1" }
+      )
+    ) as {
+      ok: boolean;
+      provider: string;
+      query: string;
+    };
+
+    expect(navigate).toHaveBeenCalledWith(
+      "chat-1",
+      "https://www.bing.com/search?q=weather%20in%20vancouver%20canada%20right%20now",
+      3000
+    );
+    expect(result.ok).toBe(true);
+    expect(result.provider).toBe("bing");
+    expect(result.query).toBe("weather in vancouver canada right now");
   });
 
   it("passes screenshot options through to the controller", async () => {

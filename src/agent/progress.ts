@@ -96,6 +96,20 @@ export function formatToolStartProgressMessage(
   const folder = readString(input, "folder");
 
   switch (toolName) {
+    case "browser_search":
+      return query
+        ? `Status: searching the web for ${quoteValue(query, 70)}`
+        : "Status: searching the web";
+    case "browser_snapshot":
+      return "Status: inspecting the browser page";
+    case "browser_click":
+      return "Status: clicking in the browser";
+    case "browser_type":
+      return "Status: typing in the browser";
+    case "browser_screenshot":
+      return "Status: taking a browser screenshot";
+    case "browser_close":
+      return "Status: closing the browser session";
     case "launch_app":
       return appName
         ? `Status: opening ${quoteValue(appName, 50)}`
@@ -198,6 +212,39 @@ export function formatToolFinishedProgressMessage(
   const error = readString(result, "error") ?? readString(result, "accessError");
 
   switch (toolName) {
+    case "browser_search":
+      if (!ok) {
+        return formatFailureStatus(
+          inputQuery
+            ? `Status: could not search the web for ${quoteValue(inputQuery, 70)}`
+            : "Status: could not search the web",
+          error
+        );
+      }
+
+      return inputQuery
+        ? `Status: finished searching the web for ${quoteValue(inputQuery, 70)}`
+        : "Status: finished searching the web";
+    case "browser_snapshot":
+      return ok
+        ? "Status: finished browser snapshot"
+        : "Status: hit an issue while running browser snapshot";
+    case "browser_click":
+      return ok
+        ? "Status: finished browser click"
+        : "Status: hit an issue while running browser click";
+    case "browser_type":
+      return ok
+        ? "Status: finished browser type"
+        : "Status: hit an issue while running browser type";
+    case "browser_screenshot":
+      return ok
+        ? "Status: finished browser screenshot"
+        : "Status: hit an issue while running browser screenshot";
+    case "browser_close":
+      return ok
+        ? "Status: finished browser close"
+        : "Status: hit an issue while running browser close";
     case "launch_app":
       return ok
         ? matchedApp

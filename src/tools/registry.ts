@@ -7,6 +7,7 @@ import { BrowserController } from "./browser-controller.js";
 import { createBrowserClickTool } from "./browser-click.js";
 import { createBrowserCloseTool } from "./browser-close.js";
 import { createBrowserNavigateTool } from "./browser-navigate.js";
+import { createBrowserSearchTool } from "./browser-search.js";
 import { createBrowserScreenshotTool } from "./browser-screenshot.js";
 import { createBrowserSnapshotTool } from "./browser-snapshot.js";
 import { createBrowserTypeTool } from "./browser-type.js";
@@ -102,6 +103,7 @@ export function createDefaultToolRegistry(options: CreateDefaultToolRegistryOpti
     createRequestExternalReviewTool(options.approvalStore, options.approvalPolicy),
     createLaunchAppTool(options.appLauncher),
     createBrowserNavigateTool(options.browserController),
+    createBrowserSearchTool(options.browserController),
     createBrowserSnapshotTool(options.browserController),
     createBrowserClickTool(options.browserController),
     createBrowserTypeTool(options.browserController),
