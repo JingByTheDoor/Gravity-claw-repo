@@ -51,6 +51,34 @@ describe("AgentLoop", () => {
     });
   });
 
+  it("prepends the Gemma thinking token to the system prompt when enabled", async () => {
+    const llmClient: LLMClient = {
+      checkHealth: vi.fn(async () => undefined),
+      runStep: vi.fn(async (): Promise<LLMRunResponse> => ({
+        message: {
+          role: "assistant",
+          content: "Hello from local Ollama."
+        }
+      }))
+    };
+
+    const loop = new AgentLoop({
+      llmClient,
+      toolRegistry: new ToolRegistry([createGetCurrentTimeTool()]),
+      memoryStore: createMemoryStoreStub(),
+      maxIterations: 4,
+      enableModelThinking: true,
+      logger: createLogger("error"),
+      errorStore: new RuntimeErrorStore()
+    });
+
+    await loop.run("chat-1", "say hello");
+
+    const firstCall = vi.mocked(llmClient.runStep).mock.calls[0]?.[0];
+    expect(firstCall?.messages[0]?.role).toBe("system");
+    expect(firstCall?.messages[0]?.content.startsWith("<|think|>\n")).toBe(true);
+  });
+
   it("handles a tool roundtrip", async () => {
     const llmClient: LLMClient = {
       checkHealth: vi.fn(async () => undefined),

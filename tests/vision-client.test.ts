@@ -37,6 +37,11 @@ describe("VisionClient", () => {
       host: "http://127.0.0.1:11434",
       model: "gemma4:latest",
       logger: createLogger("error"),
+      sampling: {
+        temperature: 1,
+        topP: 0.95,
+        topK: 64
+      },
       fetchImpl: fetchImpl as typeof fetch
     });
 
@@ -62,6 +67,11 @@ describe("VisionClient", () => {
       host: "http://127.0.0.1:11434",
       model: "gemma4:latest",
       logger: createLogger("error"),
+      sampling: {
+        temperature: 1,
+        topP: 0.95,
+        topK: 64
+      },
       fetchImpl: fetchImpl as typeof fetch
     });
 
@@ -92,6 +102,11 @@ describe("VisionClient", () => {
       host: "http://127.0.0.1:11434",
       model: "gemma4:latest",
       logger: createLogger("error"),
+      sampling: {
+        temperature: 1,
+        topP: 0.95,
+        topK: 64
+      },
       fetchImpl: fetchImpl as typeof fetch
     });
 
@@ -114,11 +129,57 @@ describe("VisionClient", () => {
       host: "http://127.0.0.1:11434",
       model: "gemma4:latest",
       logger: createLogger("error"),
+      sampling: {
+        temperature: 1,
+        topP: 0.95,
+        topK: 64
+      },
       fetchImpl: fetchImpl as typeof fetch
     });
 
     await expect(client.ocrRead(imagePath)).rejects.toThrow(
       `Ollama vision request failed for model "gemma4:latest" at http://127.0.0.1:11434/api/chat while processing ${imagePath}: fetch failed`
     );
+  });
+
+  it("passes sampling and an optional visual token budget to Ollama vision", async () => {
+    const imagePath = createTempImage();
+    let requestBody: Record<string, unknown> | undefined;
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return new Response(JSON.stringify({
+        message: {
+          content: "<|channel>thought\nhidden reasoning<channel|>{\"text\":\"Hello world\",\"lines\":[\"Hello world\"]}"
+        }
+      }), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json"
+        }
+      });
+    });
+
+    const client = new VisionClient({
+      host: "http://127.0.0.1:11434",
+      model: "gemma4:latest",
+      logger: createLogger("error"),
+      sampling: {
+        temperature: 1,
+        topP: 0.95,
+        topK: 64
+      },
+      visionTokenBudget: 560,
+      fetchImpl: fetchImpl as typeof fetch
+    });
+
+    const result = await client.ocrRead(imagePath);
+
+    expect(result.text).toBe("Hello world");
+    expect(requestBody?.options).toEqual({
+      temperature: 1,
+      top_p: 0.95,
+      top_k: 64,
+      visual_token_budget: 560
+    });
   });
 });

@@ -1,6 +1,9 @@
+import { prependGemmaThinkingToken } from "../llm/gemma.js";
+
 interface BuildSystemPromptOptions {
   coreFacts?: Array<{ key: string; value: string }>;
   latestSummary?: string;
+  enableThinking?: boolean;
 }
 
 export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): string {
@@ -19,7 +22,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
     ? `Conversation summary:\n${options.latestSummary}`
     : "Conversation summary:\n- None yet.";
 
-  return [
+  const prompt = [
     "You are Gravity Claw, a local-first general computer worker controlled through Telegram.",
     "Reply clearly and briefly.",
     "You are an acting agent, not just a chat assistant.",
@@ -74,4 +77,6 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
     coreFactsSection,
     summarySection
   ].join(" ");
+
+  return prependGemmaThinkingToken(prompt, options.enableThinking === true);
 }

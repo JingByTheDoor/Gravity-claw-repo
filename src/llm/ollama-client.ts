@@ -1,11 +1,15 @@
 import type { AgentMessage, LLMRunRequest, LLMRunResponse, ToolCall } from "../agent/types.js";
 import type { LLMClient } from "./client.js";
 import type { Logger } from "../logging/logger.js";
+import type { OllamaSamplingConfig } from "./gemma.js";
+import { stripGemmaThinkingContent } from "./gemma.js";
+import { buildOllamaRequestOptions } from "./options.js";
 
 interface OllamaClientOptions {
   host: string;
   model: string;
   logger: Logger;
+  sampling: OllamaSamplingConfig;
   healthCheckMaxAttempts?: number;
   healthCheckRetryDelayMs?: number;
 }
@@ -117,9 +121,7 @@ export class OllamaClient implements LLMClient {
               parameters: tool.parameters
             }
           })),
-          options: {
-            temperature: 0
-          }
+          options: buildOllamaRequestOptions(this.options.sampling)
         })
       });
 
@@ -137,7 +139,7 @@ export class OllamaClient implements LLMClient {
       return {
         message: {
           role: "assistant",
-          content: payload.message.content ?? "",
+          content: stripGemmaThinkingContent(payload.message.content ?? ""),
           ...(toolCalls ? { toolCalls } : {})
         }
       };

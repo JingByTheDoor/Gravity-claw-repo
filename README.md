@@ -8,6 +8,7 @@ Level 4 tools-ready foundation for a local-first Telegram AI agent.
 - Local Ollama inference only
 - Optional fast-first model routing with escalation to a stronger local model
 - A bounded tool loop
+- Configurable Ollama sampling defaults and optional Gemma 4 thinking mode
 - Local SQLite memory with recent context, durable facts, and rolling summaries
 - Built-in tools:
   - `get_current_time`
@@ -68,10 +69,13 @@ Level 4 tools-ready foundation for a local-first Telegram AI agent.
 3. Make sure Ollama is running and the configured model exists
 4. Optional: set `OLLAMA_FAST_MODEL` to a smaller local model if you want every task to hit a fast router first and escalate harder requests to `OLLAMA_MODEL`
 5. Optional: set `OLLAMA_VISION_MODEL` to a multimodal local model if you want reliable OCR and element-finding results. If unset, it falls back to `OLLAMA_MODEL`.
-6. Optional: change `DATABASE_PATH` if you do not want `gravity-claw.db` in the repo root
-7. Optional: set `WORKSPACE_ROOT` if the agent should inspect a different local folder
-8. Optional: set `TOOL_ALLOWED_ROOTS` if the agent should read or use shell cwd in additional local folders outside the default workspace root
-9. Install dependencies:
+6. Optional: tune Ollama sampling with `OLLAMA_TEMPERATURE`, `OLLAMA_TOP_P`, and `OLLAMA_TOP_K`. The example env now defaults these to the Gemma 4 recommendations from Ollama's Gemma 4 model page.
+7. Optional: set `OLLAMA_ENABLE_THINKING=true` if you want the system prompt to start with `<|think|>` for Gemma 4 style thinking mode.
+8. Optional: set `OLLAMA_VISION_TOKEN_BUDGET` to `70`, `140`, `280`, `560`, or `1120` if your local Ollama Gemma 4 setup supports per-request visual token budgets. Higher values are better for OCR and small text.
+9. Optional: change `DATABASE_PATH` if you do not want `gravity-claw.db` in the repo root
+10. Optional: set `WORKSPACE_ROOT` if the agent should inspect a different local folder
+11. Optional: set `TOOL_ALLOWED_ROOTS` if the agent should read or use shell cwd in additional local folders outside the default workspace root
+12. Install dependencies:
 
 ```bash
 npm install
@@ -138,6 +142,7 @@ npm run build
 - Small local models can miss tool calls or need simpler prompts. This is expected at this stage.
 - If `OLLAMA_FAST_MODEL` is set, the fast model sees each task first, keeps easy tasks for itself, and rewrites/escalates harder ones to `OLLAMA_MODEL`.
 - If `OLLAMA_VISION_MODEL` is set, OCR and element-finding use that model. If it is unset, they fall back to `OLLAMA_MODEL`.
+- Assistant thought blocks are stripped from saved conversation history before future turns are replayed, which keeps Gemma 4 multi-turn conversations aligned with Ollama's guidance.
 - OCR and element-finding work best with a multimodal model. A text-only chat model may pass health checks for chat and still perform poorly for vision tasks.
 - Conversation memory is stored locally in SQLite and kept on your machine.
 - Pending shell approvals and `/last_error` now survive bot restarts because they are stored in the local SQLite database.

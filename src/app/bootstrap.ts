@@ -75,7 +75,15 @@ export async function buildApp(env: AppEnv = loadEnv()): Promise<AppServices> {
   const desktopController = new DesktopController({ logger, appLauncher });
   const modelProvider = new OllamaModelProvider({
     host: env.ollamaHost,
-    logger
+    logger,
+    sampling: {
+      temperature: env.ollamaTemperature,
+      topP: env.ollamaTopP,
+      topK: env.ollamaTopK
+    },
+    ...(env.ollamaVisionTokenBudget !== undefined
+      ? { visionTokenBudget: env.ollamaVisionTokenBudget }
+      : {})
   });
   const visionClient = modelProvider.createVisionClient(env.ollamaVisionModel);
   const approvalPolicy = new DefaultApprovalPolicy();
@@ -140,6 +148,7 @@ export async function buildApp(env: AppEnv = loadEnv()): Promise<AppServices> {
     toolRegistry,
     memoryStore,
     maxIterations: env.agentMaxIterations,
+    enableModelThinking: env.ollamaEnableThinking,
     logger,
     errorStore
   });
@@ -249,6 +258,11 @@ export async function startApp(app: AppServices): Promise<void> {
             ollamaModel: app.env.ollamaModel,
             ollamaFastModel: app.env.ollamaFastModel,
             ollamaVisionModel: app.env.ollamaVisionModel,
+            ollamaTemperature: app.env.ollamaTemperature,
+            ollamaTopP: app.env.ollamaTopP,
+            ollamaTopK: app.env.ollamaTopK,
+            ollamaEnableThinking: app.env.ollamaEnableThinking,
+            ollamaVisionTokenBudget: app.env.ollamaVisionTokenBudget ?? null,
             fastRoutingEnabled: app.env.ollamaFastModel !== app.env.ollamaModel,
             databasePath: app.env.databasePath,
             workspaceRoot: app.env.workspaceRoot ?? process.cwd(),

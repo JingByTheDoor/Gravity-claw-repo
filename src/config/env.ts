@@ -1,5 +1,6 @@
 import dotenv from "dotenv";
 import { z } from "zod";
+import { GEMMA_VISION_TOKEN_BUDGETS, type GemmaVisionTokenBudget } from "../llm/gemma.js";
 
 const envSchema = z.object({
   TELEGRAM_BOT_TOKEN: z.string().trim().min(1, "TELEGRAM_BOT_TOKEN is required."),
@@ -12,6 +13,17 @@ const envSchema = z.object({
   OLLAMA_MODEL: z.string().trim().min(1).default("qwen2.5:3b"),
   OLLAMA_FAST_MODEL: z.string().trim().min(1).optional(),
   OLLAMA_VISION_MODEL: z.string().trim().min(1).optional(),
+  OLLAMA_TEMPERATURE: z.coerce.number().min(0).default(1),
+  OLLAMA_TOP_P: z.coerce.number().gt(0).max(1).default(0.95),
+  OLLAMA_TOP_K: z.coerce.number().int().positive().default(64),
+  OLLAMA_ENABLE_THINKING: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
+  OLLAMA_VISION_TOKEN_BUDGET: z
+    .enum(GEMMA_VISION_TOKEN_BUDGETS.map((value) => String(value)) as [string, ...string[]])
+    .optional()
+    .transform((value) => (value === undefined ? undefined : Number(value) as GemmaVisionTokenBudget)),
   WORKER_LABEL: z.string().trim().min(1).default("Gravity Claw Worker"),
   WORKER_MODE: z.enum(["local", "vm"]).default("local"),
   WORKER_HOST_PROFILE_ROOT: z.string().trim().min(1).optional(),
@@ -50,6 +62,11 @@ export interface AppEnv {
   ollamaModel: string;
   ollamaFastModel: string;
   ollamaVisionModel: string;
+  ollamaTemperature: number;
+  ollamaTopP: number;
+  ollamaTopK: number;
+  ollamaEnableThinking: boolean;
+  ollamaVisionTokenBudget?: GemmaVisionTokenBudget;
   workerLabel: string;
   workerMode: "local" | "vm";
   workerHostProfileRoot?: string;
@@ -114,6 +131,13 @@ export function parseEnv(source: Record<string, string | undefined>): AppEnv {
     ollamaModel,
     ollamaFastModel,
     ollamaVisionModel,
+    ollamaTemperature: result.data.OLLAMA_TEMPERATURE,
+    ollamaTopP: result.data.OLLAMA_TOP_P,
+    ollamaTopK: result.data.OLLAMA_TOP_K,
+    ollamaEnableThinking: result.data.OLLAMA_ENABLE_THINKING,
+    ...(result.data.OLLAMA_VISION_TOKEN_BUDGET !== undefined
+      ? { ollamaVisionTokenBudget: result.data.OLLAMA_VISION_TOKEN_BUDGET }
+      : {}),
     workerLabel: result.data.WORKER_LABEL,
     workerMode: result.data.WORKER_MODE,
     ...(result.data.WORKER_HOST_PROFILE_ROOT

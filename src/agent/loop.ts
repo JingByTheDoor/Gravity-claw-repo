@@ -46,6 +46,7 @@ interface AgentLoopOptions {
   toolRegistry: ToolRegistry;
   memoryStore: MemoryStoreLike;
   maxIterations: number;
+  enableModelThinking?: boolean;
   logger: Logger;
   errorStore: RuntimeErrorStore;
 }
@@ -709,6 +710,9 @@ export class AgentLoop {
         role: "system",
         content: buildSystemPrompt({
           coreFacts: promptContext.coreFacts,
+          ...(this.options.enableModelThinking !== undefined
+            ? { enableThinking: this.options.enableModelThinking }
+            : {}),
           ...(promptContext.latestSummary ? { latestSummary: promptContext.latestSummary } : {})
         })
       },

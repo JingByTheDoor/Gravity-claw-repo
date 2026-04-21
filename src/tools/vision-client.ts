@@ -1,5 +1,8 @@
 import fs from "node:fs/promises";
 import type { Logger } from "../logging/logger.js";
+import type { GemmaVisionTokenBudget, OllamaSamplingConfig } from "../llm/gemma.js";
+import { stripGemmaThinkingContent } from "../llm/gemma.js";
+import { buildOllamaRequestOptions } from "../llm/options.js";
 
 export interface OcrReadResult {
   ok: boolean;
@@ -23,6 +26,8 @@ interface VisionClientOptions {
   host: string;
   model: string;
   logger: Logger;
+  sampling: OllamaSamplingConfig;
+  visionTokenBudget?: GemmaVisionTokenBudget;
   fetchImpl?: typeof fetch;
 }
 
@@ -147,9 +152,7 @@ export class VisionClient {
             content: prompt,
             images: [imageBytes.toString("base64")]
           } satisfies OllamaVisionMessage],
-          options: {
-            temperature: 0
-          }
+          options: buildOllamaRequestOptions(this.options.sampling, this.options.visionTokenBudget)
         })
       });
 
@@ -158,7 +161,9 @@ export class VisionClient {
       }
 
       const payload = (await response.json()) as OllamaVisionResponse;
-      const content = payload.message?.content;
+      const content = payload.message?.content
+        ? stripGemmaThinkingContent(payload.message.content)
+        : undefined;
       if (!content) {
         throw new Error("missing message content");
       }

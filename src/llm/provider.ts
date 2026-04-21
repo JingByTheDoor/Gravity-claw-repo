@@ -1,11 +1,14 @@
 import type { ModelProvider } from "../runtime/contracts.js";
 import type { Logger } from "../logging/logger.js";
+import type { GemmaVisionTokenBudget, OllamaSamplingConfig } from "./gemma.js";
 import { OllamaClient } from "./ollama-client.js";
 import { VisionClient } from "../tools/vision-client.js";
 
 interface OllamaModelProviderOptions {
   host: string;
   logger: Logger;
+  sampling: OllamaSamplingConfig;
+  visionTokenBudget?: GemmaVisionTokenBudget;
 }
 
 export class OllamaModelProvider implements ModelProvider {
@@ -20,7 +23,8 @@ export class OllamaModelProvider implements ModelProvider {
     return new OllamaClient({
       host: this.options.host,
       model,
-      logger: this.options.logger
+      logger: this.options.logger,
+      sampling: this.options.sampling
     });
   }
 
@@ -28,7 +32,11 @@ export class OllamaModelProvider implements ModelProvider {
     return new VisionClient({
       host: this.options.host,
       model,
-      logger: this.options.logger
+      logger: this.options.logger,
+      sampling: this.options.sampling,
+      ...(this.options.visionTokenBudget !== undefined
+        ? { visionTokenBudget: this.options.visionTokenBudget }
+        : {})
     });
   }
 }
