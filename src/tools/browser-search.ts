@@ -51,6 +51,14 @@ export function createBrowserSearchTool(browserController: BrowserController): T
         timeout_ms: {
           type: "string",
           description: "Optional navigation timeout in milliseconds."
+        },
+        max_text_length: {
+          type: "string",
+          description: "Optional limit for returned visible page text."
+        },
+        max_elements: {
+          type: "string",
+          description: "Optional limit for the number of returned interactive elements."
         }
       },
       required: ["query"],
@@ -67,16 +75,28 @@ export function createBrowserSearchTool(browserController: BrowserController): T
 
       const provider = resolveSearchProvider(input.provider);
       const timeoutMs = parseDesktopInteger(input.timeout_ms);
-      const result = await browserController.navigate(
+      const maxTextLength = parseDesktopInteger(input.max_text_length);
+      const maxElements = parseDesktopInteger(input.max_elements);
+      const navigationResult = await browserController.navigate(
         context.chatId,
         buildSearchUrl(query, provider),
         timeoutMs
       );
+      const snapshotResult = await browserController.snapshot(context.chatId, {
+        ...(maxTextLength !== undefined ? { maxTextLength } : {}),
+        ...(maxElements !== undefined ? { maxElements } : {})
+      });
 
       return JSON.stringify({
-        ...result,
+        ok: navigationResult.ok && snapshotResult.ok,
+        url: snapshotResult.url,
+        title: snapshotResult.title,
+        status: navigationResult.status,
         query,
-        provider
+        provider,
+        text: snapshotResult.text,
+        truncated: snapshotResult.truncated,
+        elements: snapshotResult.elements
       });
     }
   };

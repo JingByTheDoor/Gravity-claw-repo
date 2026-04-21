@@ -186,14 +186,24 @@ describe("browser tools", () => {
       title: "weather - Search",
       status: 200
     }));
-    const tool = createBrowserSearchTool({ navigate } as never);
+    const snapshot = vi.fn(async () => ({
+      ok: true,
+      url: "https://www.bing.com/search?q=weather",
+      title: "weather - Search",
+      text: "Current weather in Vancouver",
+      truncated: false,
+      elements: []
+    }));
+    const tool = createBrowserSearchTool({ navigate, snapshot } as never);
 
     const result = JSON.parse(
       await tool.execute(
         {
           query: "weather in vancouver canada right now",
           provider: "bing",
-          timeout_ms: "3000"
+          timeout_ms: "3000",
+          max_text_length: "1200",
+          max_elements: "10"
         },
         { chatId: "chat-1" }
       )
@@ -201,6 +211,7 @@ describe("browser tools", () => {
       ok: boolean;
       provider: string;
       query: string;
+      text: string;
     };
 
     expect(navigate).toHaveBeenCalledWith(
@@ -208,9 +219,14 @@ describe("browser tools", () => {
       "https://www.bing.com/search?q=weather%20in%20vancouver%20canada%20right%20now",
       3000
     );
+    expect(snapshot).toHaveBeenCalledWith("chat-1", {
+      maxTextLength: 1200,
+      maxElements: 10
+    });
     expect(result.ok).toBe(true);
     expect(result.provider).toBe("bing");
     expect(result.query).toBe("weather in vancouver canada right now");
+    expect(result.text).toBe("Current weather in Vancouver");
   });
 
   it("passes screenshot options through to the controller", async () => {

@@ -43,6 +43,8 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
     "When the target is a web page you can access with browser tools, prefer browser inspection and browser clicks or typing over screenshot OCR, mouse clicks, or keyboard automation.",
     "For live or current web information such as weather, news, prices, exchange rates, schedules, or search queries, use browser tools instead of answering from general knowledge.",
     "When you do not already have a direct URL, prefer browser_search instead of opening a search homepage and typing into it.",
+    "browser_search already opens the results page and returns page text and interactive elements, so do not call browser_navigate or browser_snapshot immediately afterward unless you truly need a different page or a second check.",
+    "Avoid redundant browser steps. If the current browser page already contains the answer, reply from that result instead of navigating again.",
     "For common web lookups, start by navigating to a direct site or a search URL you can inspect, then use browser_snapshot to read the current result before replying.",
     "Use browser_close when you need to reset the browser session cleanly.",
     "Use request_external_review after you prepare an outbound email, message, or other high-impact external action but before you actually send or submit it.",
